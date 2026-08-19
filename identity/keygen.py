@@ -1,6 +1,7 @@
 """Ed25519 key and signing helpers."""
 
 import base64
+import binascii
 from dataclasses import dataclass
 from typing import Any
 
@@ -63,12 +64,17 @@ def sign_payload(private_key: Ed25519PrivateKey, payload: dict[str, Any]) -> str
 
 
 def verify_signature(
-    public_key: Ed25519PublicKey, payload: dict[str, Any], signature_b64: str
+    public_key: Ed25519PublicKey, payload: dict[str, Any], signature_b64: str | None
 ) -> bool:
-    """Verify a payload signature; invalid signatures return False, malformed input raises."""
-    signature = base64.b64decode(signature_b64, validate=True)
+    """Verify a payload signature; invalid or malformed signatures return False."""
+    if signature_b64 is None:
+        return False
+    try:
+        signature = base64.b64decode(signature_b64, validate=True)
+    except (binascii.Error, ValueError):
+        return False
     try:
         public_key.verify(signature, canonicalize(payload))
-    except InvalidSignature:
+    except (InvalidSignature, ValueError):
         return False
     return True
