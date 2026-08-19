@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from api.main import app
 from authority.delegation_issuer import DelegationIssuer
+from identity.delegation_token import DelegationToken
 from identity.instruction import Instruction, sign_instruction
 from identity.keygen import generate_keypair, serialize_public_key
 from verifier.result import ACCEPTED, AGENT_REVOKED, INVALID_SIGNATURE
@@ -81,6 +82,96 @@ def test_verify_happy_path(client: TestClient) -> None:
     data = response.json()
     assert data["accepted"] is True
     assert data["reason_code"] == ACCEPTED
+
+
+def test_dashboard_controls_are_demo_gated(client: TestClient, monkeypatch) -> None:
+    monkeypatch.delenv("ALLOW_TEST_BOOTSTRAP", raising=False)
+
+    assert client.post("/redteam/run", json={}).status_code == 403
+    assert client.post("/demo/send-valid").status_code == 403
+
+
+def test_dashboard_controls_run_against_the_live_app_state(
+    client: TestClient, monkeypatch
+) -> None:
+    monkeypatch.setenv("ALLOW_TEST_BOOTSTRAP", "1")
+
+    valid = client.post("/demo/send-valid")
+    redteam = client.post(
+        "/redteam/run", json={"attacks": ["attack_unsigned_instruction"]}
+    )
+    state = client.get("/dashboard/state")
+
+    assert valid.status_code == 200
+    assert valid.json()["reason_code"] == ACCEPTED
+    assert redteam.status_code == 200
+    assert redteam.json()["results"][0]["passed"] is True
+    assert state.status_code == 200
+    assert "agent_status" in state.json()
+
+
+def test_test_bootstrap_is_disabled_by_default(client: TestClient, monkeypatch) -> None:
+    monkeypatch.delenv("ALLOW_TEST_BOOTSTRAP", raising=False)
+
+    response = client.post(
+        "/test/bootstrap",
+        json={"public_key": "not-used", "subject_agent_id": "test-agent"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_test_bootstrap_issues_a_token_that_verifies(
+    client: TestClient, monkeypatch
+) -> None:
+    monkeypatch.setenv("ALLOW_TEST_BOOTSTRAP", "1")
+    agent_keypair = generate_keypair()
+    subject_agent_id = "bootstrap-agent"
+    bootstrap_response = client.post(
+        "/test/bootstrap",
+        json={
+            "public_key": serialize_public_key(agent_keypair.public_key),
+            "subject_agent_id": subject_agent_id,
+        },
+    )
+
+    assert bootstrap_response.status_code == 200
+    bootstrap = bootstrap_response.json()
+    assert bootstrap["key_version"]
+    token = DelegationToken(**bootstrap["delegation_token"])
+    instruction = sign_instruction(
+        Instruction(
+            instruction_id="bootstrap-instruction",
+            instruction_nonce="bootstrap-nonce",
+            issued_at=int(time.time()),
+            issuer=subject_agent_id,
+            target_agent_id=app.state.trust_verifier.agent_id,
+            action=ACTION,
+            signer_pubkey_id=bootstrap["key_version"],
+            signature=None,
+            delegation_token=token,
+            params={},
+        ),
+        agent_keypair.private_key,
+    )
+    response = client.post(
+        "/instruction/verify",
+        json={
+            "instruction_id": instruction.instruction_id,
+            "instruction_nonce": instruction.instruction_nonce,
+            "issued_at": instruction.issued_at,
+            "issuer": instruction.issuer,
+            "target_agent_id": instruction.target_agent_id,
+            "action": instruction.action,
+            "signer_pubkey_id": instruction.signer_pubkey_id,
+            "signature": instruction.signature,
+            "delegation_token": bootstrap["delegation_token"],
+            "params": instruction.params,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reason_code"] == ACCEPTED
 
 
 def test_verify_tampered_instruction_is_a_business_rejection_not_http_error(

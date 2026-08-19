@@ -1,0 +1,159 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Agent Trust Verifier - Lambda, HTTP API, and DynamoDB persistence
+
+Parameters:
+  RootPrivateKeyB64:
+    Type: String
+    NoEcho: true
+    Description: >-
+      Base64-encoded raw Ed25519 root private key. For production, retrieve this
+      from AWS Secrets Manager or SSM Parameter Store instead of a Lambda environment variable.
+  GeminiApiKey:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: >-
+      Optional demo key. In production use AWS Secrets Manager or SSM Parameter Store;
+      never commit the actual key.
+  AllowTestBootstrap:
+    Type: String
+    Default: '0'
+    AllowedValues: ['0', '1']
+    Description: Enable the development-only /test/bootstrap endpoint only for demos.
+
+Resources:
+  ReplayTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: nonce_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: nonce_key
+          KeyType: HASH
+
+  IdentityTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: agent_id
+          AttributeType: S
+        - AttributeName: key_version
+          AttributeType: S
+      KeySchema:
+        - AttributeName: agent_id
+          KeyType: HASH
+        - AttributeName: key_version
+          KeyType: RANGE
+
+  AuditTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: instruction_id
+          AttributeType: S
+        - AttributeName: issuer
+          AttributeType: S
+        - AttributeName: target
+          AttributeType: S
+      KeySchema:
+        - AttributeName: instruction_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: issuer-index
+          KeySchema:
+            - AttributeName: issuer
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: target-index
+          KeySchema:
+            - AttributeName: target
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  ReputationTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: agent_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: agent_id
+          KeyType: HASH
+
+  TrustVerifierApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+
+  TrustVerifierFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../
+      Handler: api.lambda_handler.handler
+      Runtime: python3.12
+      MemorySize: 512
+      Timeout: 30
+      Environment:
+        Variables:
+          STORAGE_BACKEND: dynamodb
+          REPLAY_TABLE: !Ref ReplayTable
+          IDENTITY_TABLE: !Ref IdentityTable
+          AUDIT_TABLE: !Ref AuditTable
+          REPUTATION_TABLE: !Ref ReputationTable
+          ROOT_PRIVATE_KEY_B64: !Ref RootPrivateKeyB64
+          GEMINI_API_KEY: !Ref GeminiApiKey
+          ALLOW_TEST_BOOTSTRAP: !Ref AllowTestBootstrap
+          VERIFIER_AGENT_ID: agent-api
+          ENVIRONMENT: aws
+      Events:
+        Root:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TrustVerifierApi
+            Path: /
+            Method: ANY
+        Proxy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TrustVerifierApi
+            Path: /{proxy+}
+            Method: ANY
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: ReadWriteVerifierTables
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - !GetAtt ReplayTable.Arn
+                - !GetAtt IdentityTable.Arn
+                - !GetAtt AuditTable.Arn
+                - !GetAtt ReputationTable.Arn
+                - !Sub '${AuditTable.Arn}/index/*'
+            # DynamoAuditService currently scans the audit chain for unfiltered
+            # audit queries and integrity checks. Replace this with a purpose-built
+            # GSI/query design before production scale-out.
+            - Sid: AuditTableScanTemporaryException
+              Effect: Allow
+              Action: dynamodb:Scan
+              Resource: !GetAtt AuditTable.Arn
+
+Outputs:
+  ApiBaseUrl:
+    Description: Base URL for the deployed HTTP API
+    Value: !Sub 'https://${TrustVerifierApi}.execute-api.${AWS::Region}.amazonaws.com'
+  TrustVerifierFunctionName:
+    Description: Lambda function name
+    Value: !Ref TrustVerifierFunction

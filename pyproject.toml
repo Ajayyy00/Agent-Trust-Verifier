@@ -19,6 +19,7 @@ testpaths = [
     "storage/tests",
     "api/tests",
     "agents/tests",
+    "redteam/tests",
 ]
 
 [tool.black]

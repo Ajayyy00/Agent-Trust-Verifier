@@ -6,8 +6,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 
-from identity.keygen import generate_keypair
+from identity.keygen import generate_keypair, load_keypair_from_private_key_b64
 from storage.backend import (
     get_audit_service,
     get_key_registry,
@@ -36,8 +37,14 @@ async def lifespan(app: FastAPI):
     audit_service = get_audit_service()
     reputation_service = get_reputation_service()
 
-    # In demo mode, if the root key is not provided, generate an ephemeral one.
-    root_keypair = generate_keypair()
+    # Deployments provide a stable root key so signatures survive Lambda cold starts.
+    # An ephemeral root remains convenient and safe for local/test use only.
+    root_private_key_b64 = os.getenv("ROOT_PRIVATE_KEY_B64")
+    root_keypair = (
+        load_keypair_from_private_key_b64(root_private_key_b64)
+        if root_private_key_b64
+        else generate_keypair()
+    )
     agent_id = os.getenv("VERIFIER_AGENT_ID", "agent-api")
 
     # Define a default local policy allowing all actions for the demo
@@ -65,6 +72,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Agent Trust Verifier API", lifespan=lifespan)
+
+# The dashboard is static and may be hosted separately from the API Gateway URL.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.getenv("DASHBOARD_ALLOWED_ORIGINS", "*").split(","),
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
+)
 
 # Add custom middlewares
 # Important: middlewares run in order they are added in FastAPI.

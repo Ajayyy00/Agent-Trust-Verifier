@@ -24,7 +24,7 @@ class DynamoAuditService:
     @staticmethod
     def _record_from_item(item: dict[str, Any]) -> AuditRecord:
         return AuditRecord(
-            instruction_id=item["instruction_id"],
+            instruction_id=item.get("actual_instruction_id", item["instruction_id"]),
             issuer=item["issuer"],
             target=item["target"],
             action=item["action"],
@@ -57,6 +57,7 @@ class DynamoAuditService:
             FilterExpression="#sequence = :sequence",
             ExpressionAttributeNames={"#sequence": "sequence"},
             ExpressionAttributeValues={":sequence": sequence - 1},
+            ConsistentRead=True,
         )
         previous = response.get("Items", [])
         if not previous:
@@ -71,6 +72,8 @@ class DynamoAuditService:
         record = AuditRecord(**record_fields, prev_hash=prev_hash, record_hash=record_hash)
         item = {
             **record_fields,
+            "instruction_id": str(sequence),
+            "actual_instruction_id": record_fields["instruction_id"],
             "prev_hash": prev_hash,
             "record_hash": record_hash,
             "sequence": sequence,

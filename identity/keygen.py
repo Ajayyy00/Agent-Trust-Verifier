@@ -58,6 +58,22 @@ def deserialize_public_key(b64_str: str) -> Ed25519PublicKey:
     return Ed25519PublicKey.from_public_bytes(base64.b64decode(b64_str, validate=True))
 
 
+def load_keypair_from_private_key_b64(private_key_b64: str) -> KeyPair:
+    """Load an Ed25519 keypair from a base64-encoded raw private key."""
+    private_key_bytes = base64.b64decode(private_key_b64, validate=True)
+    private_key = Ed25519PrivateKey.from_private_bytes(private_key_bytes)
+    public_key = private_key.public_key()
+    return KeyPair(
+        private_key=private_key,
+        public_key=public_key,
+        public_key_bytes=public_key.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        ),
+        private_key_bytes=private_key_bytes,
+    )
+
+
 def sign_payload(private_key: Ed25519PrivateKey, payload: dict[str, Any]) -> str:
     """Canonicalize and sign a payload, returning a base64-encoded Ed25519 signature."""
     return base64.b64encode(private_key.sign(canonicalize(payload))).decode("ascii")

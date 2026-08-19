@@ -9,9 +9,12 @@ Install: pip install google-genai
 
 import os
 import time
+from dotenv import load_dotenv
 
 from google import genai
 from google.genai import types
+
+load_dotenv()
 
 
 def ask_agent(system_prompt: str, user_task: str) -> str:
@@ -26,6 +29,7 @@ def ask_agent(system_prompt: str, user_task: str) -> str:
             "GEMINI_API_KEY environment variable is not set. "
             "Export it before running agents."
         )
+    model = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
 
     client = genai.Client(api_key=api_key)
 
@@ -35,7 +39,7 @@ def ask_agent(system_prompt: str, user_task: str) -> str:
     for attempt in range(max_retries + 1):
         try:
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model=model,
                 contents=user_task,
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,

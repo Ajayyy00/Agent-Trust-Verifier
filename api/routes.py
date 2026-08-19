@@ -1,23 +1,85 @@
 """API Endpoints."""
 
+import os
 import time
+import uuid
+from dataclasses import dataclass
 from typing import List, Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from .schemas import (
     AuditRecordResponse,
+    BootstrapRequest,
+    BootstrapResponse,
     DashboardStateResponse,
+    DelegationTokenPayload,
     HealthResponse,
     InstructionPayload,
     ReputationResponse,
+    RedTeamRunRequest,
     RevocationRequest,
     VerificationResponse,
 )
+from authority.delegation_issuer import DelegationIssuer
+from agents.business_actions import execute_action
 from identity.delegation_token import DelegationToken
-from identity.instruction import Instruction
+from identity.instruction import Instruction, sign_instruction
+from identity.keygen import generate_keypair, serialize_public_key
 
 router = APIRouter()
+
+_TEST_BOOTSTRAP_SCOPE = ["finance:report:generate", "finance:payment:refund"]
+_DASHBOARD_AGENTS = ["agent_a", "agent_b", "attacker"]
+
+
+def _require_demo_controls() -> None:
+    """Keep dashboard actions unavailable unless this is an explicit demo deployment."""
+    if os.getenv("ALLOW_TEST_BOOTSTRAP") != "1":
+        raise HTTPException(status_code=403, detail="Dashboard controls are disabled")
+
+
+def _bootstrap_credentials(
+    app, public_key: str, subject_agent_id: str
+) -> BootstrapResponse:
+    """Register a generated test identity with an application's root authority."""
+    key_version = f"{subject_agent_id}-{uuid.uuid4().hex}"
+    app.state.key_registry.register(subject_agent_id, public_key, key_version)
+    token = DelegationIssuer(app.state.root_keypair.private_key, "root-v1").issue_token(
+        subject_agent_id,
+        _TEST_BOOTSTRAP_SCOPE,
+        expiry_seconds=300,
+        requested_depth=1,
+    )
+    return BootstrapResponse(
+        delegation_token=DelegationTokenPayload(
+            token_id=token.token_id,
+            subject_agent_id=token.subject_agent_id,
+            max_scope=token.max_scope,
+            delegation_depth=token.delegation_depth,
+            max_delegation_depth=token.max_delegation_depth,
+            expiry=token.expiry,
+            issuer_key_id=token.issuer_key_id,
+            issuer_signature=token.issuer_signature,
+        ),
+        key_version=key_version,
+    )
+
+
+@router.post("/test/bootstrap", response_model=BootstrapResponse)
+def bootstrap_test_identity(payload: BootstrapRequest, request: Request) -> BootstrapResponse:
+    """Register an ephemeral test identity and issue a root-signed token when enabled.
+
+    This route is intentionally unavailable unless the server is explicitly started
+    with ``ALLOW_TEST_BOOTSTRAP=1``. It exists solely for local and test deployments
+    whose ephemeral root authority is otherwise inaccessible to external tooling.
+    """
+    if os.getenv("ALLOW_TEST_BOOTSTRAP") != "1":
+        raise HTTPException(status_code=403, detail="Test bootstrap is disabled")
+
+    return _bootstrap_credentials(
+        request.app, payload.public_key, payload.subject_agent_id
+    )
 
 
 def _instruction_from_payload(payload: InstructionPayload) -> Instruction:
@@ -53,6 +115,11 @@ def verify_instruction(payload: InstructionPayload, request: Request):
     now = int(time.time())
     result = verifier.verify(instruction, now)
 
+    return _verification_response(result)
+
+
+def _verification_response(result) -> VerificationResponse:
+    """Serialize a verifier result for both HTTP and in-process callers."""
     return VerificationResponse(
         accepted=result.accepted,
         reason_code=result.reason_code,
@@ -65,6 +132,98 @@ def verify_instruction(payload: InstructionPayload, request: Request):
         risk_level=result.risk_level,
         requires_review=result.requires_review,
     )
+
+
+@dataclass
+class _InProcessResponse:
+    status_code: int
+    body: dict
+
+    def json(self) -> dict:
+        return self.body
+
+    @property
+    def text(self) -> str:
+        return str(self.body)
+
+
+class _DashboardAttackClient:
+    """Small route adapter used by the dashboard without an outbound HTTP hop."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    def post(self, path: str, json: dict) -> _InProcessResponse:
+        if path == "/test/bootstrap":
+            credentials = _bootstrap_credentials(
+                self.app, json["public_key"], json["subject_agent_id"]
+            )
+            return _InProcessResponse(200, credentials.model_dump())
+        if path == "/instruction/verify":
+            instruction = _instruction_from_payload(InstructionPayload(**json))
+            result = self.app.state.trust_verifier.verify(instruction, int(time.time()))
+            return _InProcessResponse(200, _verification_response(result).model_dump())
+        if path.startswith("/agents/") and path.endswith("/revoke"):
+            agent_id = path.split("/")[2]
+            self.app.state.key_registry.revoke(agent_id, json["reason"])
+            return _InProcessResponse(
+                200,
+                {"agent_id": agent_id, "status": self.app.state.key_registry.get_status(agent_id)},
+            )
+        return _InProcessResponse(404, {"detail": "Not found"})
+
+
+@router.post("/redteam/run")
+def run_redteam(payload: RedTeamRunRequest, request: Request):
+    """Run selected Phase 9 attacks against this app without an HTTP round trip."""
+    from redteam.attacks import ATTACKS, create_attack_context
+
+    _require_demo_controls()
+    attack_map = {attack.__name__: attack for attack in ATTACKS}
+    selected_names = payload.attacks or list(attack_map)
+    unknown = sorted(set(selected_names) - set(attack_map))
+    if unknown:
+        raise HTTPException(status_code=422, detail={"unknown_attacks": unknown})
+
+    client = _DashboardAttackClient(request.app)
+    target_agent_id = request.app.state.trust_verifier.agent_id
+    results = [
+        attack(create_attack_context(client, target_agent_id))
+        for name in selected_names
+        for attack in [attack_map[name]]
+    ]
+    return {"results": results}
+
+
+@router.post("/demo/send-valid", response_model=VerificationResponse)
+def send_valid_instruction(request: Request):
+    """Generate, sign, verify, and execute one non-destructive demo instruction."""
+    _require_demo_controls()
+    keypair = generate_keypair()
+    subject_agent_id = f"dashboard-demo-{uuid.uuid4().hex}"
+    credentials = _bootstrap_credentials(
+        request.app, serialize_public_key(keypair.public_key), subject_agent_id
+    )
+    token = DelegationToken(**credentials.delegation_token.model_dump())
+    instruction = sign_instruction(
+        Instruction(
+            instruction_id=f"dashboard-instruction-{uuid.uuid4().hex}",
+            instruction_nonce=uuid.uuid4().hex,
+            issued_at=int(time.time()),
+            issuer=subject_agent_id,
+            target_agent_id=request.app.state.trust_verifier.agent_id,
+            action="finance:report:generate",
+            signer_pubkey_id=credentials.key_version,
+            signature=None,
+            delegation_token=token,
+            params={"period": "Q3-2024", "account_id": "dashboard"},
+        ),
+        keypair.private_key,
+    )
+    result = request.app.state.trust_verifier.verify(instruction, int(time.time()))
+    if result.accepted:
+        execute_action(instruction.action, instruction.params)
+    return _verification_response(result)
 
 
 @router.post("/agents/{agent_id}/revoke")
@@ -143,7 +302,13 @@ def health_check(request: Request):
         status = "unhealthy"
 
     latency_ms = (time.perf_counter() - start) * 1000
-    return HealthResponse(status=status, backend=backend, latency_ms=latency_ms)
+    return HealthResponse(
+        status=status,
+        backend=backend,
+        latency_ms=latency_ms,
+        region=os.getenv("AWS_REGION", "local"),
+        environment=os.getenv("ENVIRONMENT", backend),
+    )
 
 
 @router.get("/dashboard/state", response_model=DashboardStateResponse)
@@ -156,11 +321,14 @@ def get_dashboard_state(request: Request):
     audit_feed = audit_records[-50:]
 
     reputation = {}
-    for agent in ["agent_a", "agent_b", "attacker"]:
+    agent_status = {}
+    for agent in _DASHBOARD_AGENTS:
         reputation[agent] = get_reputation(agent, request)
+        agent_status[agent] = request.app.state.key_registry.get_status(agent)
 
     return DashboardStateResponse(
         health=health,
         reputation=reputation,
+        agent_status=agent_status,
         audit_feed=audit_feed,
     )

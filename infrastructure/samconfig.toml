@@ -1,0 +1,9 @@
+version = 0.1
+
+[default.deploy.parameters]
+# Replace these values for your account/region before your first guided deploy.
+stack_name = "agent-trust-verifier"
+region = "eu-north-1"
+confirm_changeset = false
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true

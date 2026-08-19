@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Trust Verifier</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="status-strip">
+      <span id="health-dot" class="health-dot"></span>
+      <span id="health-status">—</span>
+      <span id="latency">— ms</span>
+      <span id="region">—</span>
+      <span id="environment">—</span>
+    </header>
+    <main>
+      <section class="panel feed-panel">
+        <div class="panel-title"><span>LIVE INSTRUCTION FEED</span><span id="feed-count">0</span></div>
+        <div class="table-wrap"><table><thead><tr><th>TIME</th><th>AGENT</th><th>ACTION</th><th>CHECK_FAILED</th><th>OUTCOME</th></tr></thead><tbody id="feed"></tbody></table></div>
+      </section>
+      <section class="panel controls">
+        <div class="panel-title">CONTROL PANEL</div>
+        <div class="control-grid">
+          <button id="send-valid">Send valid instruction</button>
+          <div class="attack-control"><select id="attack-select" aria-label="Attack selection"><option value="all">Run attack suite: all</option><option value="attack_unsigned_instruction">unsigned instruction</option><option value="attack_forged_signature">forged signature</option><option value="attack_tampered_action">tampered action</option><option value="attack_wrong_destination">wrong destination</option><option value="attack_scope_escalation">scope escalation</option><option value="attack_expired_token">expired token</option><option value="attack_replay">replay</option><option value="attack_revoked_agent">revoked agent</option></select><button id="run-attacks">Run attack suite</button></div>
+          <button id="revoke-agent" class="danger">Revoke Agent A</button>
+          <button id="fire-concurrent">Fire 20 concurrent requests</button>
+        </div>
+        <output id="control-result"></output>
+      </section>
+      <section class="agent-grid" id="agent-cards"></section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

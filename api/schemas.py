@@ -15,6 +15,20 @@ class DelegationTokenPayload(BaseModel):
     issuer_signature: Optional[str] = None
 
 
+class BootstrapRequest(BaseModel):
+    """Development-only request for registering a test agent identity."""
+
+    public_key: str
+    subject_agent_id: str
+
+
+class BootstrapResponse(BaseModel):
+    """Development-only credentials used by the red-team suite."""
+
+    delegation_token: DelegationTokenPayload
+    key_version: str
+
+
 class InstructionPayload(BaseModel):
     instruction_id: str
     instruction_nonce: str
@@ -45,6 +59,12 @@ class VerificationResponse(BaseModel):
     requires_review: bool
 
 
+class RedTeamRunRequest(BaseModel):
+    """Optional subset of red-team attack function names to execute."""
+
+    attacks: List[str] | None = None
+
+
 class AuditRecordResponse(BaseModel):
     instruction_id: str
     issuer: str
@@ -72,11 +92,14 @@ class HealthResponse(BaseModel):
     status: str
     backend: str
     latency_ms: float
+    region: str
+    environment: str
 
 
 class DashboardStateResponse(BaseModel):
     health: HealthResponse
     reputation: dict[str, ReputationResponse]
+    agent_status: dict[str, str]
     audit_feed: List[AuditRecordResponse]
 
 
