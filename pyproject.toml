@@ -10,7 +10,14 @@ requires-python = ">=3.10"
 dependencies = ["cryptography"]
 
 [tool.pytest.ini_options]
-testpaths = ["identity/tests"]
+testpaths = [
+    "identity/tests",
+    "authority",
+    "verifier/tests",
+    "audit/tests",
+    "reputation/tests",
+    "storage/tests",
+]
 
 [tool.black]
 line-length = 88
