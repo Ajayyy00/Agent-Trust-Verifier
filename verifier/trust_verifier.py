@@ -183,6 +183,8 @@ class TrustVerifier:
     def verify(self, instruction: Instruction, now: int) -> VerificationResult:
         """Verify an instruction and fail closed if its audit record cannot be persisted."""
         decision = self._security_decision(instruction, now)
+        if decision.reason_code == INVALID_SCHEMA:
+            return decision
         finalized_result = self._audit_and_return(instruction, decision, now)
         try:
             score = self.reputation_service.record_outcome(

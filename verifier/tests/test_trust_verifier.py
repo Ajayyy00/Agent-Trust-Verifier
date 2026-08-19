@@ -12,6 +12,7 @@ from verifier.result import (
     AGENT_REVOKED,
     AUDIT_FAILURE,
     FUTURE_TIMESTAMP,
+    INVALID_SCHEMA,
     INVALID_SIGNATURE,
     POLICY_DENIED,
     REPLAY_DETECTED,
@@ -73,6 +74,15 @@ def test_happy_path_is_accepted() -> None:
     verifier, instruction, _ = _happy_path()
 
     assert verifier.verify(instruction, NOW).reason_code == ACCEPTED
+
+
+def test_invalid_schema_is_rejected_directly() -> None:
+    verifier, _, _ = _happy_path()
+
+    result = verifier.verify("not-an-instruction", NOW)
+
+    assert result.accepted is False
+    assert result.reason_code == INVALID_SCHEMA
 
 
 def test_accepted_instruction_creates_audit_record() -> None:
