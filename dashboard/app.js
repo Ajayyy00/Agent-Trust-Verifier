@@ -1,47 +1,24 @@
 const API_BASE_URL = "https://sih25orneb.execute-api.eu-north-1.amazonaws.com";
-const STATE_INTERVAL_MS = 1500;
-const HEALTH_INTERVAL_MS = 4000;
+const STATE_INTERVAL_MS = 2000;
+const HEALTH_INTERVAL_MS = 5000;
 const AGENTS = ["agent_a", "agent_b", "attacker"];
 const $ = (selector) => document.querySelector(selector);
-const endpoint = (path) => `${API_BASE_URL.replace(/\/$/, "")}${path}`;
-
-async function request(path, options = {}) {
-  const response = await fetch(endpoint(path), { headers: { "Content-Type": "application/json", ...(options.headers || {}) }, ...options });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.detail || body.error || `${response.status}`);
-  return body;
-}
-function showControl(value, failed = false) { const output = $("#control-result"); output.textContent = value; output.classList.toggle("failed", failed); }
-function formatTime(timestamp) { return timestamp ? new Date(timestamp * 1000).toLocaleTimeString() : "—"; }
-
-function renderFeed(records) {
-  const feed = $("#feed"); feed.replaceChildren();
-  const newestFirst = [...records].sort((a, b) => b.timestamp - a.timestamp);
-  $("#feed-count").textContent = newestFirst.length;
-  for (const record of newestFirst) {
-    const row = document.createElement("tr"); row.className = "feed-row";
-    row.innerHTML = `<td>${formatTime(record.timestamp)}</td><td>${record.issuer}</td><td>${record.action}</td><td>${record.reason_code === "ACCEPTED" ? "—" : record.reason_code}</td><td>${record.result}</td>`;
-    const detail = document.createElement("tr"); detail.className = "raw-row"; detail.hidden = true;
-    detail.innerHTML = `<td colspan="5"><pre>${JSON.stringify(record, null, 2)}</pre></td>`;
-    row.addEventListener("click", () => { detail.hidden = !detail.hidden; }); feed.append(row, detail);
-  }
-}
-function renderAgents(reputation, agentStatus) {
-  const container = $("#agent-cards"); container.replaceChildren();
-  for (const agent of AGENTS) {
-    const data = reputation[agent] || {}; const card = document.createElement("article"); card.className = "agent-card";
-    card.innerHTML = `<div class="agent-name">${agent}</div><dl><div><dt>SCORE</dt><dd>${data.score ?? "—"}</dd></div><div><dt>STATUS</dt><dd>${agentStatus[agent] ?? "unknown"}</dd></div><div><dt>REVIEW</dt><dd>${data.requires_review ? "YES" : "NO"}</dd></div></dl>`;
-    container.append(card);
-  }
-}
-async function pollHealth() {
-  try { const health = await request("/health"); $("#health-dot").classList.toggle("healthy", health.status === "healthy"); $("#health-status").textContent = health.status; $("#latency").textContent = `${Math.round(health.latency_ms)} ms`; $("#region").textContent = health.region; $("#environment").textContent = health.environment; }
-  catch { $("#health-dot").classList.remove("healthy"); $("#health-status").textContent = "offline"; }
-}
-async function pollState() { try { const state = await request("/dashboard/state"); renderFeed(state.audit_feed || []); renderAgents(state.reputation || {}, state.agent_status || {}); } catch (error) { showControl(error.message, true); } }
-
-$("#send-valid").addEventListener("click", async () => { try { const result = await request("/demo/send-valid", { method: "POST" }); showControl(result.reason_code); pollState(); } catch (error) { showControl(error.message, true); } });
-$("#run-attacks").addEventListener("click", async () => { try { const selected = $("#attack-select").value; const body = selected === "all" ? {} : { attacks: [selected] }; const result = await request("/redteam/run", { method: "POST", body: JSON.stringify(body) }); const passed = result.results.filter((item) => item.passed).length; showControl(`${passed}/${result.results.length}`); pollState(); } catch (error) { showControl(error.message, true); } });
-$("#revoke-agent").addEventListener("click", async () => { try { const result = await request("/agents/agent_a/revoke", { method: "POST", body: JSON.stringify({ reason: "dashboard" }) }); showControl(result.status); pollState(); } catch (error) { showControl(error.message, true); } });
-$("#fire-concurrent").addEventListener("click", async () => { const requests = Array.from({ length: 20 }, (_, index) => index >= 18 ? request("/redteam/run", { method: "POST", body: JSON.stringify({ attacks: ["attack_tampered_action"] }) }) : request("/demo/send-valid", { method: "POST" })); const results = await Promise.allSettled(requests); showControl(`${results.filter((result) => result.status === "fulfilled").length}/20`); pollState(); });
-pollHealth(); pollState(); setInterval(pollHealth, HEALTH_INTERVAL_MS); setInterval(pollState, STATE_INTERVAL_MS);
+function endpoint(path) { return `${API_BASE_URL.replace(/\/$/, "")}${path}`; }
+async function request(path, options = {}) { const startedAt = performance.now(); const response = await fetch(endpoint(path), { headers: { "Content-Type": "application/json", ...(options.headers || {}) }, ...options }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.detail || data.error || `HTTP ${response.status}`); return { data, latency: Math.round(performance.now() - startedAt) }; }
+function setText(element, value) { element.textContent = value == null || value === "" ? "--" : String(value); }
+function formatTime(timestamp) { return timestamp ? new Date(timestamp * 1000).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit", second:"2-digit" }) : "--"; }
+function shortId(value) { if (!value) return "--"; const id = String(value); return id.length > 22 ? `${id.slice(0,11)}…${id.slice(-6)}` : id; }
+function clear(element) { element.replaceChildren(); }
+function cell(value, className = "") { const element = document.createElement("td"); if (className) element.className = className; element.textContent = value; return element; }
+function showControl(message, failed = false) { const result = $("#control-result"); result.textContent = message; result.className = `control-result ${failed ? "failure" : "success"}`; window.clearTimeout(showControl.timeout); showControl.timeout = window.setTimeout(() => { result.textContent = ""; result.className = "control-result"; }, 6000); }
+function renderFeed(records) { const feed = $("#feed"); const sorted = [...records].sort((a,b) => (b.timestamp || 0) - (a.timestamp || 0)); setText($("#feed-count"), `${sorted.length} event${sorted.length === 1 ? "" : "s"}`); clear(feed); if (!sorted.length) { const row = document.createElement("tr"); row.className = "empty-row"; const emptyCell = cell("No audit events", "empty-cell"); emptyCell.colSpan = 5; row.append(emptyCell); feed.append(row); return; } sorted.forEach((record,index) => { const accepted = record.result === "accepted" || record.reason_code === "ACCEPTED"; const row = document.createElement("tr"); row.className = `feed-row ${accepted ? "accepted" : "rejected"}`; row.tabIndex = 0; row.setAttribute("role", "button"); row.setAttribute("aria-expanded", "false"); row.setAttribute("aria-label", `Show raw result for ${record.action || "verification event"}`); if (index === 0) row.classList.add("new"); const agent = cell(shortId(record.issuer || record.subject_agent_id), "agent-id"); agent.title = record.issuer || record.subject_agent_id || ""; const action = cell(record.action || "--", "action-name"); action.title = record.action || ""; const reason = cell("", "reason-cell"); const reasonBadge = document.createElement("span"); const reasonCode = record.reason_code || "--"; reasonBadge.className = `reason-code ${reasonCode === "ACCEPTED" ? "" : "failure"}`; reasonBadge.textContent = reasonCode === "ACCEPTED" ? "--" : reasonCode; reason.append(reasonBadge); const outcome = cell("", "outcome-cell"); const outcomeBadge = document.createElement("span"); outcomeBadge.className = `outcome ${accepted ? "accepted" : "rejected"}`; outcomeBadge.textContent = record.result || (accepted ? "accepted" : "rejected"); outcome.append(outcomeBadge); row.append(cell(formatTime(record.timestamp)), agent, action, reason, outcome); const detail = document.createElement("tr"); detail.className = "raw-row"; detail.hidden = true; const detailCell = document.createElement("td"); detailCell.colSpan = 5; const raw = document.createElement("pre"); raw.textContent = JSON.stringify(record, null, 2); detailCell.append(raw); detail.append(detailCell); const toggleDetail = () => { detail.hidden = !detail.hidden; row.setAttribute("aria-expanded", String(!detail.hidden)); }; row.addEventListener("click", toggleDetail); row.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleDetail(); } }); feed.append(row, detail); }); }
+function renderAgents(reputation, agentStatus) { const cards = $("#agent-cards"); clear(cards); const knownAgents = AGENTS.filter(agent => reputation[agent] || agentStatus[agent]).length; setText($("#agent-count"), `${knownAgents} agent${knownAgents === 1 ? "" : "s"}`); AGENTS.forEach(agent => { const item = reputation[agent] || {}; const status = agentStatus[agent] || "unknown"; const score = Number.isFinite(item.score) ? item.score : null; const scoreValue = score === null ? 0 : Math.max(0, Math.min(100, score)); const statusClass = status === "active" ? "status-active" : status === "revoked" ? "status-revoked" : "status-unknown"; const card = document.createElement("article"); card.className = "agent-card"; const top = document.createElement("div"); top.className = "agent-topline"; const name = document.createElement("span"); name.className = "agent-name"; name.textContent = agent; const badge = document.createElement("span"); badge.className = `status-badge ${statusClass}`; badge.textContent = status; top.append(name, badge); const meta = document.createElement("div"); meta.className = "agent-meta"; const scoreText = document.createElement("span"); scoreText.className = "agent-score"; scoreText.textContent = score === null ? "--" : score; const track = document.createElement("span"); track.className = "score-track"; track.setAttribute("aria-label", `Reputation score ${score === null ? "unknown" : score}`); const fill = document.createElement("span"); fill.className = "score-fill"; fill.style.width = `${scoreValue}%`; track.append(fill); const review = document.createElement("span"); review.className = `review-flag ${item.requires_review ? "yes" : ""}`; review.textContent = item.requires_review ? "Review required" : "No review"; meta.append(scoreText, track, review); card.append(top, meta); cards.append(card); }); }
+async function pollHealth() { const dot = $("#health-dot"); try { const {data,latency} = await request("/health"); const healthy = data.status === "healthy"; dot.classList.toggle("healthy",healthy); dot.classList.toggle("offline",!healthy); setText($("#health-status"),data.status || "unavailable"); setText($("#latency"),`${latency} ms`); setText($("#region"),data.region || "--"); setText($("#environment"),data.environment || "--"); } catch { dot.classList.remove("healthy"); dot.classList.add("offline"); setText($("#health-status"),"offline"); setText($("#latency"),"-- ms"); } }
+async function pollState() { try { const {data} = await request("/dashboard/state"); renderFeed(data.audit_feed || []); renderAgents(data.reputation || {},data.agent_status || {}); } catch { /* Health status communicates connection failures. */ } }
+function setButtonBusy(button,busy) { button.disabled = busy; button.classList.toggle("is-busy",busy); button.setAttribute("aria-busy",String(busy)); }
+async function runControl(button,operation) { setButtonBusy(button,true); try { await operation(); await pollState(); } catch (error) { showControl(error.message || "Request failed",true); } finally { setButtonBusy(button,false); } }
+$("#send-valid").addEventListener("click",() => runControl($("#send-valid"),async () => { const {data} = await request("/demo/send-valid",{method:"POST"}); showControl(`Valid instruction: ${data.reason_code || "completed"}`,data.reason_code !== "ACCEPTED"); }));
+$("#run-attacks").addEventListener("click",() => runControl($("#run-attacks"),async () => { const attack = $("#attack-select").value; const {data} = await request("/redteam/run",{method:"POST",body:JSON.stringify(attack === "all" ? {} : {attacks:[attack]})}); const total = data.results?.length || 0; const passed = data.results?.filter(result => result.passed).length || 0; showControl(`Attack suite: ${passed}/${total} caught`,passed !== total); }));
+$("#revoke-agent").addEventListener("click",() => { if (!window.confirm("Revoke Agent A?")) return; runControl($("#revoke-agent"),async () => { const {data} = await request("/agents/agent_a/revoke",{method:"POST",body:JSON.stringify({reason:"dashboard"})}); showControl(`Agent A: ${data.status || "revoked"}`); }); });
+$("#fire-concurrent").addEventListener("click",() => runControl($("#fire-concurrent"),async () => { const tasks = Array.from({length:20},(_,index) => index >= 18 ? request("/redteam/run",{method:"POST",body:JSON.stringify({attacks:["attack_tampered_action"]})}) : request("/demo/send-valid",{method:"POST"})); const results = await Promise.allSettled(tasks); const complete = results.filter(result => result.status === "fulfilled").length; showControl(`Concurrent run: ${complete}/20 completed`,complete !== 20); }));
+pollHealth(); pollState(); window.setInterval(pollHealth,HEALTH_INTERVAL_MS); window.setInterval(pollState,STATE_INTERVAL_MS);

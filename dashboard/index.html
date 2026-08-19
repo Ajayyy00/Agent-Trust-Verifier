@@ -1,35 +1,59 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f7fa">
     <title>Agent Trust Verifier</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
   </head>
   <body>
-    <header class="status-strip">
-      <span id="health-dot" class="health-dot"></span>
-      <span id="health-status">—</span>
-      <span id="latency">— ms</span>
-      <span id="region">—</span>
-      <span id="environment">—</span>
+    <header class="status-strip" aria-label="Service status">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3.25 19 6v5.15c0 4.41-2.93 7.88-7 9.6-4.07-1.72-7-5.19-7-9.6V6l7-2.75Z"/><path d="m8.75 11.8 2.15 2.15 4.35-4.45"/></svg>
+        </span>
+        <div><p class="eyebrow">LIVE VERIFICATION</p><h1>Agent Trust Verifier</h1></div>
+      </div>
+      <div class="service-status">
+        <span class="health-indicator"><i id="health-dot" class="health-dot" aria-hidden="true"></i><span id="health-status">connecting</span></span>
+        <span class="metric"><span class="metric-label">Latency</span><strong id="latency">-- ms</strong></span>
+        <span class="env-tag" id="region">--</span>
+        <span class="env-tag" id="environment">--</span>
+      </div>
     </header>
-    <main>
-      <section class="panel feed-panel">
-        <div class="panel-title"><span>LIVE INSTRUCTION FEED</span><span id="feed-count">0</span></div>
-        <div class="table-wrap"><table><thead><tr><th>TIME</th><th>AGENT</th><th>ACTION</th><th>CHECK_FAILED</th><th>OUTCOME</th></tr></thead><tbody id="feed"></tbody></table></div>
-      </section>
-      <section class="panel controls">
-        <div class="panel-title">CONTROL PANEL</div>
-        <div class="control-grid">
-          <button id="send-valid">Send valid instruction</button>
-          <div class="attack-control"><select id="attack-select" aria-label="Attack selection"><option value="all">Run attack suite: all</option><option value="attack_unsigned_instruction">unsigned instruction</option><option value="attack_forged_signature">forged signature</option><option value="attack_tampered_action">tampered action</option><option value="attack_wrong_destination">wrong destination</option><option value="attack_scope_escalation">scope escalation</option><option value="attack_expired_token">expired token</option><option value="attack_replay">replay</option><option value="attack_revoked_agent">revoked agent</option></select><button id="run-attacks">Run attack suite</button></div>
-          <button id="revoke-agent" class="danger">Revoke Agent A</button>
-          <button id="fire-concurrent">Fire 20 concurrent requests</button>
+    <main class="dashboard-shell">
+      <section class="feed-panel panel" aria-labelledby="feed-title">
+        <div class="panel-heading"><div><p class="eyebrow">AUDIT TRAIL</p><h2 id="feed-title">Live instruction feed</h2></div><span id="feed-count" class="count-badge">Loading</span></div>
+        <div class="table-wrap">
+          <table>
+            <caption class="sr-only">Recent verification events. Select a row to inspect its raw result.</caption>
+            <thead><tr><th scope="col">Time</th><th scope="col">Agent</th><th scope="col">Action</th><th scope="col">Check failed</th><th scope="col">Outcome</th></tr></thead>
+            <tbody id="feed"><tr class="loading-row"><td colspan="5">Loading audit events</td></tr></tbody>
+          </table>
         </div>
-        <output id="control-result"></output>
       </section>
-      <section class="agent-grid" id="agent-cards"></section>
+      <aside class="side-column">
+        <section class="panel control-panel" aria-labelledby="controls-title">
+          <div class="panel-heading compact"><div><p class="eyebrow">CONTROLS</p><h2 id="controls-title">Run verification</h2></div></div>
+          <div class="control-grid">
+            <button id="send-valid" class="button button-primary" type="button"><span>Send valid instruction</span><span class="button-loader" aria-hidden="true"></span></button>
+            <label class="attack-picker" for="attack-select"><span>Attack scenario</span><select id="attack-select"><option value="all">All attacks</option><option value="attack_unsigned_instruction">Unsigned instruction</option><option value="attack_forged_signature">Forged signature</option><option value="attack_tampered_action">Tampered action</option><option value="attack_wrong_destination">Wrong audience</option><option value="attack_scope_escalation">Scope escalation</option><option value="attack_expired_token">Expired token</option><option value="attack_replay">Replay</option><option value="attack_revoked_agent">Revoked agent</option></select></label>
+            <button id="run-attacks" class="button button-secondary" type="button"><span>Run attack suite</span><span class="button-loader" aria-hidden="true"></span></button>
+            <div class="control-divider" aria-hidden="true"></div>
+            <button id="revoke-agent" class="button button-danger" type="button"><span>Revoke Agent A</span><span class="button-loader" aria-hidden="true"></span></button>
+            <button id="fire-concurrent" class="button button-quiet" type="button"><span>Fire 20 concurrent requests</span><span class="button-loader" aria-hidden="true"></span></button>
+          </div>
+          <p id="control-result" class="control-result" role="status" aria-live="polite"></p>
+        </section>
+        <section class="panel agents-panel" aria-labelledby="agents-title">
+          <div class="panel-heading compact"><div><p class="eyebrow">IDENTITIES</p><h2 id="agents-title">Agent state</h2></div><span id="agent-count" class="count-badge">--</span></div>
+          <div id="agent-cards" class="agent-cards" aria-live="polite"></div>
+        </section>
+      </aside>
     </main>
     <script src="app.js"></script>
   </body>
