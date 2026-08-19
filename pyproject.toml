@@ -18,6 +18,7 @@ testpaths = [
     "reputation/tests",
     "storage/tests",
     "api/tests",
+    "agents/tests",
 ]
 
 [tool.black]

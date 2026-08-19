@@ -41,6 +41,7 @@ def _instruction_from_payload(payload: InstructionPayload) -> Instruction:
         signer_pubkey_id=payload.signer_pubkey_id,
         signature=payload.signature,
         delegation_token=token,
+        params=payload.params,
     )
 
 

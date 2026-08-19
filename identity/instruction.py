@@ -1,7 +1,7 @@
 """Instruction envelopes sent between agents."""
 
 import secrets
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -25,6 +25,7 @@ class Instruction:
     signer_pubkey_id: str
     signature: str | None
     delegation_token: DelegationToken
+    params: dict = field(default_factory=dict)
 
 
 def to_signable_dict(instruction: Instruction) -> dict[str, object]:
@@ -40,6 +41,7 @@ def to_signable_dict(instruction: Instruction) -> dict[str, object]:
         "action": instruction.action,
         "signer_pubkey_id": instruction.signer_pubkey_id,
         "delegation_token": token_data,
+        "params": instruction.params,
     }
 
 

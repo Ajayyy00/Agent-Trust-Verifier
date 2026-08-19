@@ -68,6 +68,7 @@ def _generate_valid_payload(client: TestClient) -> dict:
             "issuer_key_id": token.issuer_key_id,
             "issuer_signature": token.issuer_signature,
         },
+        "params": {},
     }
     return payload
 

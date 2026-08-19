@@ -7,3 +7,8 @@ htmlcov/
 .venv/
 venv/
 
+# Environment files — never commit API keys
+.env
+.env.*
+*.env
+

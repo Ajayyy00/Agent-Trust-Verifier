@@ -25,6 +25,7 @@ class InstructionPayload(BaseModel):
     signer_pubkey_id: str
     signature: Optional[str] = None
     delegation_token: DelegationTokenPayload
+    params: dict = {}
 
 
 class RevocationRequest(BaseModel):

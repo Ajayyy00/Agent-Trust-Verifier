@@ -3,4 +3,5 @@ pytest
 pytest-cov
 black
 ruff
-moto
+moto[dynamodb]
+respx

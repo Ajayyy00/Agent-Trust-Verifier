@@ -120,6 +120,14 @@ def test_tampered_token_is_rejected_before_outer_signature() -> None:
     assert verifier.verify(instruction, NOW).reason_code == TOKEN_SIGNATURE_INVALID
 
 
+def test_tampered_params_is_rejected() -> None:
+    verifier, instruction, _ = _happy_path()
+    # Instruction was signed without params, so adding them post-signing should break the signature
+    instruction.params = {"tampered": True}
+
+    assert verifier.verify(instruction, NOW).reason_code == INVALID_SIGNATURE
+
+
 def test_subject_mismatch_is_rejected() -> None:
     verifier, instruction, _ = _happy_path()
     instruction.issuer = "agent_other"
