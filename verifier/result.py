@@ -16,6 +16,7 @@ POLICY_DENIED = "POLICY_DENIED"
 TOKEN_SUBJECT_MISMATCH = "TOKEN_SUBJECT_MISMATCH"
 UNKNOWN_KEY = "UNKNOWN_KEY"
 INVALID_SCHEMA = "INVALID_SCHEMA"
+AUDIT_FAILURE = "AUDIT_FAILURE"
 
 
 @dataclass(frozen=True)
@@ -29,3 +30,6 @@ class VerificationResult:
     target: str
     action: str
     token_id: str | None = None
+    reputation_score: int = 100
+    risk_level: str = "NORMAL"
+    requires_review: bool = False

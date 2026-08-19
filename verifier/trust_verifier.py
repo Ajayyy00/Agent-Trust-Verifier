@@ -1,18 +1,25 @@
 """Fail-closed, ordered verification of signed agent instructions."""
 
+import hashlib
+from dataclasses import replace
+
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
+from audit.logger import AuditCommitError, AuditService
 from authority.delegation_issuer import verify_token_signature
+from identity.canonical import canonicalize
 from identity.delegation_token import is_expired
 from identity.instruction import Instruction, to_signable_dict
 from identity.key_registry import KeyRegistry
 from identity.keygen import deserialize_public_key, verify_signature
 from identity.scope import is_action_within_scope
+from reputation.scorer import ReputationService
 
 from .replay_store import ReplayStore
 from .result import (
     ACCEPTED,
     AGENT_REVOKED,
+    AUDIT_FAILURE,
     FUTURE_TIMESTAMP,
     INVALID_SCHEMA,
     INVALID_SIGNATURE,
@@ -39,6 +46,8 @@ class TrustVerifier:
         key_registry: KeyRegistry,
         replay_store: ReplayStore,
         local_policy: set[str],
+        audit_service: AuditService,
+        reputation_service: ReputationService,
         max_clock_skew_seconds: int = 30,
         max_instruction_age_seconds: int = 300,
     ) -> None:
@@ -47,6 +56,8 @@ class TrustVerifier:
         self.key_registry = key_registry
         self.replay_store = replay_store
         self.local_policy = local_policy
+        self.audit_service = audit_service
+        self.reputation_service = reputation_service
         self.max_clock_skew_seconds = max_clock_skew_seconds
         self.max_instruction_age_seconds = max_instruction_age_seconds
 
@@ -64,8 +75,10 @@ class TrustVerifier:
             token_id=instruction.delegation_token.token_id,
         )
 
-    def verify(self, instruction: Instruction, now: int) -> VerificationResult:
-        """Run the ordered trust checks, failing closed at the first failed check."""
+    def _security_decision(
+        self, instruction: Instruction, now: int
+    ) -> VerificationResult:
+        """Run the ordered trust checks and return the underlying security decision."""
         if not isinstance(instruction, Instruction):
             return VerificationResult(False, INVALID_SCHEMA, "", "", "", "")
 
@@ -125,3 +138,59 @@ class TrustVerifier:
             return self._result(instruction, False, REPLAY_DETECTED)
 
         return self._result(instruction, True, ACCEPTED)
+
+    def _audit_and_return(
+        self, instruction: Instruction, decision: VerificationResult, now: int
+    ) -> VerificationResult:
+        """Persist a decision, rejecting it if its audit record cannot be committed."""
+        try:
+            payload_hash = hashlib.sha256(
+                canonicalize(to_signable_dict(instruction))
+            ).hexdigest()
+            self.audit_service.commit(
+                {
+                    "instruction_id": decision.instruction_id,
+                    "issuer": decision.issuer,
+                    "target": decision.target,
+                    "action": decision.action,
+                    "token_id": decision.token_id,
+                    "policy_version": "v1",
+                    "key_id": getattr(instruction, "signer_pubkey_id", None),
+                    "result": (
+                        "accepted" if decision.reason_code == ACCEPTED else "rejected"
+                    ),
+                    "reason_code": decision.reason_code,
+                    "timestamp": now,
+                    "payload_hash": payload_hash,
+                }
+            )
+        except (AuditCommitError, AttributeError, TypeError, ValueError):
+            return VerificationResult(
+                accepted=False,
+                reason_code=AUDIT_FAILURE,
+                instruction_id=decision.instruction_id,
+                issuer=decision.issuer,
+                target=decision.target,
+                action=decision.action,
+                token_id=decision.token_id,
+            )
+        return decision
+
+    def verify(self, instruction: Instruction, now: int) -> VerificationResult:
+        """Verify an instruction and fail closed if its audit record cannot be persisted."""
+        decision = self._security_decision(instruction, now)
+        finalized_result = self._audit_and_return(instruction, decision, now)
+        try:
+            score = self.reputation_service.record_outcome(
+                instruction.issuer, finalized_result.reason_code
+            )
+            return replace(
+                finalized_result,
+                reputation_score=score,
+                risk_level=self.reputation_service.get_risk_level(instruction.issuer),
+                requires_review=self.reputation_service.requires_review(
+                    instruction.issuer
+                ),
+            )
+        except Exception:
+            return finalized_result

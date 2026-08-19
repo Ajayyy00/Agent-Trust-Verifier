@@ -1,13 +1,16 @@
 import base64
 
+from audit.logger import AuditService
 from authority.delegation_issuer import DelegationIssuer
 from identity.instruction import Instruction, sign_instruction
 from identity.key_registry import KeyRegistry
 from identity.keygen import generate_keypair, serialize_public_key
+from reputation.scorer import ReputationService
 from verifier.replay_store import ReplayStore
 from verifier.result import (
     ACCEPTED,
     AGENT_REVOKED,
+    AUDIT_FAILURE,
     FUTURE_TIMESTAMP,
     INVALID_SIGNATURE,
     POLICY_DENIED,
@@ -60,6 +63,8 @@ def _happy_path(
         registry,
         ReplayStore(),
         local_policy if local_policy is not None else {ACTION},
+        AuditService(),
+        ReputationService(),
     )
     return verifier, instruction, registry
 
@@ -68,6 +73,16 @@ def test_happy_path_is_accepted() -> None:
     verifier, instruction, _ = _happy_path()
 
     assert verifier.verify(instruction, NOW).reason_code == ACCEPTED
+
+
+def test_accepted_instruction_creates_audit_record() -> None:
+    verifier, instruction, _ = _happy_path()
+
+    assert verifier.verify(instruction, NOW).reason_code == ACCEPTED
+    assert len(verifier.audit_service.records) == 1
+    record = verifier.audit_service.records[0]
+    assert record.result == "accepted"
+    assert record.reason_code == ACCEPTED
 
 
 def test_wrong_audience_is_rejected() -> None:
@@ -166,6 +181,81 @@ def test_action_outside_delegated_scope_is_rejected() -> None:
     verifier, instruction, _ = _happy_path(token_scope=["finance:read"])
 
     assert verifier.verify(instruction, NOW).reason_code == TOKEN_SCOPE_DENIED
+    assert len(verifier.audit_service.records) == 1
+    assert verifier.audit_service.records[0].result == "rejected"
+
+
+def test_audit_failure_overrides_an_accepted_security_decision() -> None:
+    verifier, instruction, _ = _happy_path()
+    verifier.audit_service = AuditService(simulate_failure=True)
+
+    result = verifier.verify(instruction, NOW)
+
+    assert not result.accepted
+    assert result.reason_code == AUDIT_FAILURE
+
+
+def test_audit_chain_remains_intact_after_mixed_verification_results() -> None:
+    verifier, accepted_instruction, _ = _happy_path()
+    rejected_instruction = sign_instruction(
+        Instruction(
+            instruction_id="instr-2",
+            instruction_nonce="nonce-2",
+            issued_at=NOW,
+            issuer=accepted_instruction.issuer,
+            target_agent_id=accepted_instruction.target_agent_id,
+            action="finance:report:delete",
+            signer_pubkey_id=accepted_instruction.signer_pubkey_id,
+            signature=None,
+            delegation_token=accepted_instruction.delegation_token,
+        ),
+        generate_keypair().private_key,
+    )
+
+    assert verifier.verify(accepted_instruction, NOW).reason_code == ACCEPTED
+    assert verifier.verify(rejected_instruction, NOW).reason_code == INVALID_SIGNATURE
+    assert verifier.audit_service.verify_integrity() == (True, None)
+
+
+def test_high_reputation_risk_never_overrides_a_valid_instruction() -> None:
+    verifier, rejected_instruction, _ = _happy_path(token_scope=["finance:read"])
+
+    for _ in range(3):
+        assert (
+            verifier.verify(rejected_instruction, NOW).reason_code == TOKEN_SCOPE_DENIED
+        )
+
+    valid_verifier, valid_instruction, _ = _happy_path()
+    valid_verifier.reputation_service = verifier.reputation_service
+    result = valid_verifier.verify(valid_instruction, NOW)
+
+    assert result.accepted
+    assert result.reason_code == ACCEPTED
+    assert result.risk_level == "HIGH"
+    assert result.requires_review
+
+
+def test_first_instruction_for_a_fresh_agent_has_normal_reputation() -> None:
+    verifier, instruction, _ = _happy_path()
+
+    result = verifier.verify(instruction, NOW)
+
+    assert result.reputation_score == 100
+    assert result.risk_level == "NORMAL"
+    assert not result.requires_review
+
+
+def test_revocation_outcomes_do_not_reduce_reputation() -> None:
+    verifier, instruction, registry = _happy_path()
+    registry.revoke("agent_a", "credential compromised")
+
+    first_result = verifier.verify(instruction, NOW)
+    score_after_first_rejection = first_result.reputation_score
+    second_result = verifier.verify(instruction, NOW)
+
+    assert first_result.reason_code == AGENT_REVOKED
+    assert second_result.reason_code == AGENT_REVOKED
+    assert second_result.reputation_score == score_after_first_rejection
 
 
 def test_local_policy_is_an_independent_ceiling() -> None:
