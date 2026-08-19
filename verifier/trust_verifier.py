@@ -1,5 +1,8 @@
 """Fail-closed, ordered verification of signed agent instructions."""
 
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 import hashlib
 from dataclasses import replace
 
@@ -13,8 +16,9 @@ from identity.instruction import Instruction, to_signable_dict
 from identity.key_registry import KeyRegistry
 from identity.keygen import deserialize_public_key, verify_signature
 from identity.scope import is_action_within_scope
-from reputation.scorer import ReputationService
 
+if TYPE_CHECKING:
+    from reputation.scorer import ReputationService
 from .replay_store import ReplayStore
 from .result import (
     ACCEPTED,

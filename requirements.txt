@@ -1,2 +1,5 @@
 cryptography
 boto3
+fastapi
+uvicorn
+pydantic
