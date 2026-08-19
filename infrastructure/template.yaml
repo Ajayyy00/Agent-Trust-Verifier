@@ -136,6 +136,8 @@ Resources:
                 - dynamodb:PutItem
                 - dynamodb:UpdateItem
                 - dynamodb:Query
+                - dynamodb:TransactWriteItems
+                - dynamodb:ConditionCheckItem
               Resource:
                 - !GetAtt ReplayTable.Arn
                 - !GetAtt IdentityTable.Arn
@@ -149,6 +151,11 @@ Resources:
               Effect: Allow
               Action: dynamodb:Scan
               Resource: !GetAtt AuditTable.Arn
+            # Demo-only dashboard log reset; do not retain this permission in production.
+            - Sid: AuditTableDemoReset
+              Effect: Allow
+              Action: dynamodb:DeleteItem
+              Resource: !GetAtt AuditTable.Arn
 
 Outputs:
   ApiBaseUrl:
@@ -157,3 +164,6 @@ Outputs:
   TrustVerifierFunctionName:
     Description: Lambda function name
     Value: !Ref TrustVerifierFunction
+  AuditTableName:
+    Description: Physical DynamoDB audit-table name
+    Value: !Ref AuditTable

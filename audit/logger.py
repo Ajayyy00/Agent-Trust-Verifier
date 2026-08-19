@@ -57,3 +57,13 @@ class AuditService:
     def verify_integrity(self) -> tuple[bool, int | None]:
         """Verify the hash-chain integrity of every committed record."""
         return verify_chain(self._records)
+
+    def clear(self) -> int:
+        """Delete every in-memory audit record and return the count removed."""
+        deleted = len(self._records)
+        self._records.clear()
+        return deleted
+
+    def set_chaos_failure(self, enabled: bool) -> None:
+        """Enable a test-only commit failure used by live fail-closed checks."""
+        self._simulate_failure = enabled

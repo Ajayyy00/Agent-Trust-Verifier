@@ -1,9 +1,12 @@
 """DynamoDB-backed audit service tests — interface-parity mirror of test_logger.py."""
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from audit.chain import GENESIS_HASH
 from audit.dynamo_logger import DynamoAuditService
+from audit.logger import AuditCommitError
 from storage.tests.helpers import create_test_tables
 
 
@@ -115,7 +118,7 @@ def test_query_with_no_filters_returns_all_records(
     assert len(results) == 2
 
 
-def test_counter_item_never_appears_in_query_results(
+def test_chain_head_item_never_appears_in_query_results(
     service_and_mock: DynamoAuditService,
 ) -> None:
     """The internal atomic counter row must be filtered out of all query results."""
@@ -123,5 +126,45 @@ def test_counter_item_never_appears_in_query_results(
     service.commit(_record_fields(timestamp=1))
 
     results = service.query()
-    # The counter item has instruction_id == "__audit_chain_counter__"
-    assert all(r.instruction_id != "__audit_chain_counter__" for r in results)
+    assert all(r.instruction_id != "__chain_head__" for r in results)
+
+
+def test_query_sorts_by_timestamp_not_string_sequence(
+    service_and_mock: DynamoAuditService,
+) -> None:
+    service = service_and_mock
+    service.commit(_record_fields(timestamp=2))
+    service.commit(_record_fields(timestamp=10))
+
+    assert [record.timestamp for record in service.query()] == [2, 10]
+
+
+def test_concurrent_commits_form_one_intact_gap_free_chain(
+    service_and_mock: DynamoAuditService,
+) -> None:
+    service = service_and_mock
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        records = list(
+            executor.map(
+                lambda timestamp: service.commit(_record_fields(timestamp=timestamp)),
+                range(1, 17),
+            )
+        )
+
+    assert len({record.instruction_id for record in records}) == 16
+    assert len(service.query()) == 16
+    assert service.verify_integrity() == (True, None)
+
+
+def test_persisted_chaos_switch_forces_audit_commit_failure(
+    service_and_mock: DynamoAuditService,
+) -> None:
+    service = service_and_mock
+    service.set_chaos_failure(True)
+
+    with pytest.raises(AuditCommitError, match="Simulated chaos"):
+        service.commit(_record_fields(timestamp=1))
+
+    service.set_chaos_failure(False)
+    service.commit(_record_fields(timestamp=2))

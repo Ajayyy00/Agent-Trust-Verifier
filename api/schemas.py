@@ -1,7 +1,7 @@
 """Pydantic request/response models representing the API contract."""
 
-from typing import List, Optional
-from pydantic import BaseModel
+from typing import List, Literal, Optional
+from pydantic import BaseModel, Field
 
 
 class DelegationTokenPayload(BaseModel):
@@ -63,6 +63,13 @@ class RedTeamRunRequest(BaseModel):
     """Optional subset of red-team attack function names to execute."""
 
     attacks: List[str] | None = None
+
+
+class ManualPromptRequest(BaseModel):
+    """A dashboard prompt to parse and submit using a demo identity."""
+
+    prompt: str = Field(min_length=1, max_length=4_000)
+    agent_id: Literal["agent_a", "agent_b", "attacker"]
 
 
 class AuditRecordResponse(BaseModel):

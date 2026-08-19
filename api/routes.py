@@ -16,6 +16,7 @@ from .schemas import (
     DelegationTokenPayload,
     HealthResponse,
     InstructionPayload,
+    ManualPromptRequest,
     ReputationResponse,
     RedTeamRunRequest,
     RevocationRequest,
@@ -23,6 +24,7 @@ from .schemas import (
 )
 from authority.delegation_issuer import DelegationIssuer
 from agents.business_actions import execute_action
+from agents.agent_a import AgentA, InstructionParseError
 from identity.delegation_token import DelegationToken
 from identity.instruction import Instruction, sign_instruction
 from identity.keygen import generate_keypair, serialize_public_key
@@ -31,6 +33,21 @@ router = APIRouter()
 
 _TEST_BOOTSTRAP_SCOPE = ["finance:report:generate", "finance:payment:refund"]
 _DASHBOARD_AGENTS = ["agent_a", "agent_b", "attacker"]
+_MANUAL_AGENT_SCOPES = {
+    "agent_a": _TEST_BOOTSTRAP_SCOPE,
+    "agent_b": _TEST_BOOTSTRAP_SCOPE,
+    # The attacker can produce a valid signature, but cannot authorize refunds.
+    "attacker": ["finance:report:generate"],
+}
+
+
+@dataclass
+class _ManualAgentCredentials:
+    """Private demo credentials retained only in the running application process."""
+
+    keypair: object
+    key_version: str
+    delegation_token: DelegationToken
 
 
 def _require_demo_controls() -> None:
@@ -66,6 +83,37 @@ def _bootstrap_credentials(
     )
 
 
+def _manual_agent_credentials(app, agent_id: str) -> _ManualAgentCredentials:
+    """Provision one process-local signing identity for an interactive dashboard agent."""
+    credentials_by_agent = getattr(app.state, "manual_agent_credentials", None)
+    if credentials_by_agent is None:
+        credentials_by_agent = {}
+        app.state.manual_agent_credentials = credentials_by_agent
+
+    credentials = credentials_by_agent.get(agent_id)
+    if credentials is not None:
+        return credentials
+
+    keypair = generate_keypair()
+    key_version = f"manual-{agent_id}-{uuid.uuid4().hex}"
+    app.state.key_registry.register(
+        agent_id, serialize_public_key(keypair.public_key), key_version
+    )
+    token = DelegationIssuer(app.state.root_keypair.private_key, "root-v1").issue_token(
+        agent_id,
+        _MANUAL_AGENT_SCOPES[agent_id],
+        expiry_seconds=300,
+        requested_depth=1,
+    )
+    credentials = _ManualAgentCredentials(
+        keypair=keypair,
+        key_version=key_version,
+        delegation_token=token,
+    )
+    credentials_by_agent[agent_id] = credentials
+    return credentials
+
+
 @router.post("/test/bootstrap", response_model=BootstrapResponse)
 def bootstrap_test_identity(payload: BootstrapRequest, request: Request) -> BootstrapResponse:
     """Register an ephemeral test identity and issue a root-signed token when enabled.
@@ -80,6 +128,27 @@ def bootstrap_test_identity(payload: BootstrapRequest, request: Request) -> Boot
     return _bootstrap_credentials(
         request.app, payload.public_key, payload.subject_agent_id
     )
+
+
+from pydantic import BaseModel
+class ChaosRequest(BaseModel):
+    fail_next: bool
+
+@router.post("/test/chaos/audit")
+def induce_audit_chaos(payload: ChaosRequest, request: Request):
+    """Safely gated test-only route to induce audit-store failures."""
+    _require_demo_controls()
+    audit_service = request.app.state.audit_service
+    audit_service.set_chaos_failure(payload.fail_next)
+    return {"chaos_fail": payload.fail_next}
+
+
+@router.post("/test/audit/reset")
+def reset_demo_audit_log(request: Request):
+    """Delete the complete audit ledger only in explicitly enabled demo deployments."""
+    _require_demo_controls()
+    deleted = request.app.state.audit_service.clear()
+    return {"deleted": deleted}
 
 
 def _instruction_from_payload(payload: InstructionPayload) -> Instruction:
@@ -223,6 +292,31 @@ def send_valid_instruction(request: Request):
     result = request.app.state.trust_verifier.verify(instruction, int(time.time()))
     if result.accepted:
         execute_action(instruction.action, instruction.params)
+    return _verification_response(result)
+
+
+@router.post("/demo/manual", response_model=VerificationResponse)
+def submit_manual_prompt(payload: ManualPromptRequest, request: Request):
+    """Parse a dashboard prompt with Gemini, sign it, and verify the result.
+
+    This is demo-only and intentionally reuses Agent A's strict LLM parsing
+    boundary: Gemini selects action and params; deterministic code creates the
+    nonce, envelope, and Ed25519 signature.
+    """
+    _require_demo_controls()
+    credentials = _manual_agent_credentials(request.app, payload.agent_id)
+    agent = AgentA(
+        keypair=credentials.keypair,
+        pubkey_id=credentials.key_version,
+        delegation_token=credentials.delegation_token,
+        target_agent_id=request.app.state.trust_verifier.agent_id,
+    )
+    try:
+        instruction = agent.propose_instruction(payload.prompt)
+    except (InstructionParseError, RuntimeError, EnvironmentError) as error:
+        raise HTTPException(status_code=502, detail=f"Prompt parsing failed: {error}") from error
+
+    result = request.app.state.trust_verifier.verify(instruction, int(time.time()))
     return _verification_response(result)
 
 

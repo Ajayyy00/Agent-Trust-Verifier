@@ -41,11 +41,18 @@
           <div class="panel-heading compact"><div><p class="eyebrow">CONTROLS</p><h2 id="controls-title">Run verification</h2></div></div>
           <div class="control-grid">
             <button id="send-valid" class="button button-primary" type="button"><span>Send valid instruction</span><span class="button-loader" aria-hidden="true"></span></button>
+            <div class="interactive-testing">
+              <div class="section-label"><span>Interactive testing</span></div>
+              <label class="prompt-field" for="manual-prompt"><span>Prompt</span><textarea id="manual-prompt" rows="3" maxlength="4000" placeholder="Generate the Q3 report for ACC-001"></textarea></label>
+              <label class="attack-picker" for="manual-agent"><span>Signing identity</span><select id="manual-agent"><option value="agent_a">Agent A</option><option value="agent_b">Agent B</option><option value="attacker">Attacker</option></select></label>
+              <button id="send-manual" class="button button-primary" type="button"><span>Send to LLM</span><span class="button-loader" aria-hidden="true"></span></button>
+            </div>
             <label class="attack-picker" for="attack-select"><span>Attack scenario</span><select id="attack-select"><option value="all">All attacks</option><option value="attack_unsigned_instruction">Unsigned instruction</option><option value="attack_forged_signature">Forged signature</option><option value="attack_tampered_action">Tampered action</option><option value="attack_wrong_destination">Wrong audience</option><option value="attack_scope_escalation">Scope escalation</option><option value="attack_expired_token">Expired token</option><option value="attack_replay">Replay</option><option value="attack_revoked_agent">Revoked agent</option></select></label>
             <button id="run-attacks" class="button button-secondary" type="button"><span>Run attack suite</span><span class="button-loader" aria-hidden="true"></span></button>
             <div class="control-divider" aria-hidden="true"></div>
             <button id="revoke-agent" class="button button-danger" type="button"><span>Revoke Agent A</span><span class="button-loader" aria-hidden="true"></span></button>
             <button id="fire-concurrent" class="button button-quiet" type="button"><span>Fire 20 concurrent requests</span><span class="button-loader" aria-hidden="true"></span></button>
+            <button id="delete-logs" class="button button-danger" type="button"><span>Delete audit logs</span><span class="button-loader" aria-hidden="true"></span></button>
           </div>
           <p id="control-result" class="control-result" role="status" aria-live="polite"></p>
         </section>

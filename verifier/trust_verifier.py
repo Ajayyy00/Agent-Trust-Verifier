@@ -168,7 +168,7 @@ class TrustVerifier:
                     "payload_hash": payload_hash,
                 }
             )
-        except (AuditCommitError, AttributeError, TypeError, ValueError):
+        except Exception:
             return VerificationResult(
                 accepted=False,
                 reason_code=AUDIT_FAILURE,

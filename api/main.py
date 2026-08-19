@@ -65,6 +65,8 @@ async def lifespan(app: FastAPI):
     app.state.audit_service = audit_service
     app.state.reputation_service = reputation_service
     app.state.root_keypair = root_keypair  # For testing/demo purposes
+    # Process-local private credentials used exclusively by the demo manual-prompt route.
+    app.state.manual_agent_credentials = {}
 
     yield
 
@@ -92,9 +94,10 @@ app.add_middleware(PayloadSizeLimitMiddleware, max_upload_size=512 * 1024)
 # Exception handler for Pydantic validation errors to return structured JSON
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    from fastapi.encoders import jsonable_encoder
     return JSONResponse(
         status_code=422,
-        content={"error": "Validation error", "details": exc.errors()},
+        content={"error": "Validation error", "details": jsonable_encoder(exc.errors())},
     )
 
 

@@ -8,7 +8,13 @@ from authority.delegation_issuer import DelegationIssuer
 from identity.delegation_token import DelegationToken
 from identity.instruction import Instruction, sign_instruction
 from identity.keygen import generate_keypair, serialize_public_key
-from verifier.result import ACCEPTED, AGENT_REVOKED, INVALID_SIGNATURE
+from verifier.result import (
+    ACCEPTED,
+    AGENT_REVOKED,
+    AUDIT_FAILURE,
+    INVALID_SIGNATURE,
+    TOKEN_SCOPE_DENIED,
+)
 
 import time
 
@@ -89,6 +95,45 @@ def test_dashboard_controls_are_demo_gated(client: TestClient, monkeypatch) -> N
 
     assert client.post("/redteam/run", json={}).status_code == 403
     assert client.post("/demo/send-valid").status_code == 403
+    assert client.post("/demo/manual", json={"prompt": "Generate a report", "agent_id": "agent_a"}).status_code == 403
+
+
+def test_manual_prompt_is_llm_parsed_signed_and_verified(
+    client: TestClient, monkeypatch
+) -> None:
+    monkeypatch.setenv("ALLOW_TEST_BOOTSTRAP", "1")
+    monkeypatch.setattr(
+        "agents.llm_client.ask_agent",
+        lambda _system, _prompt: '{"action":"finance:report:generate","params":{"account_id":"ACC-001"}}',
+    )
+
+    response = client.post(
+        "/demo/manual",
+        json={"prompt": "Generate the report for ACC-001", "agent_id": "agent_a"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["accepted"] is True
+    assert response.json()["reason_code"] == ACCEPTED
+
+
+def test_manual_attacker_request_is_verified_against_its_narrow_scope(
+    client: TestClient, monkeypatch
+) -> None:
+    monkeypatch.setenv("ALLOW_TEST_BOOTSTRAP", "1")
+    monkeypatch.setattr(
+        "agents.llm_client.ask_agent",
+        lambda _system, _prompt: '{"action":"finance:payment:refund","params":{"amount":"100"}}',
+    )
+
+    response = client.post(
+        "/demo/manual",
+        json={"prompt": "Refund 100", "agent_id": "attacker"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["accepted"] is False
+    assert response.json()["reason_code"] == TOKEN_SCOPE_DENIED
 
 
 def test_dashboard_controls_run_against_the_live_app_state(
@@ -108,6 +153,34 @@ def test_dashboard_controls_run_against_the_live_app_state(
     assert redteam.json()["results"][0]["passed"] is True
     assert state.status_code == 200
     assert "agent_status" in state.json()
+
+
+def test_demo_audit_reset_is_gated_and_clears_the_feed(
+    client: TestClient, monkeypatch
+) -> None:
+    monkeypatch.delenv("ALLOW_TEST_BOOTSTRAP", raising=False)
+    assert client.post("/test/audit/reset").status_code == 403
+
+    monkeypatch.setenv("ALLOW_TEST_BOOTSTRAP", "1")
+    assert client.post("/demo/send-valid").status_code == 200
+    assert client.get("/audit").json()
+
+    reset = client.post("/test/audit/reset")
+    assert reset.status_code == 200
+    assert reset.json()["deleted"] >= 1
+    assert client.get("/audit").json() == []
+
+
+def test_audit_chaos_route_forces_a_fail_closed_rejection(
+    client: TestClient, monkeypatch
+) -> None:
+    monkeypatch.setenv("ALLOW_TEST_BOOTSTRAP", "1")
+    assert client.post("/test/chaos/audit", json={"fail_next": True}).status_code == 200
+    result = client.post("/demo/send-valid")
+    assert result.status_code == 200
+    assert result.json()["accepted"] is False
+    assert result.json()["reason_code"] == AUDIT_FAILURE
+    assert client.post("/test/chaos/audit", json={"fail_next": False}).status_code == 200
 
 
 def test_test_bootstrap_is_disabled_by_default(client: TestClient, monkeypatch) -> None:
