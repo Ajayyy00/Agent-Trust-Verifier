@@ -304,7 +304,9 @@ def test_revoke_agent_then_verify_fails(client: TestClient, monkeypatch) -> None
     assert data["reason_code"] == AGENT_REVOKED
 
 
-def test_audit_filters(client: TestClient) -> None:
+def test_audit_filters(client: TestClient, monkeypatch) -> None:
+    # Tests model the self-contained dashboard/demo deployment.
+    monkeypatch.setenv("ALLOW_TEST_BOOTSTRAP", "1")
     payload = _generate_valid_payload(client)
     # Verify instruction to create an audit record
     client.post("/instruction/verify", json=payload)
@@ -320,7 +322,8 @@ def test_audit_filters(client: TestClient) -> None:
     assert len(response_empty.json()) == 0
 
 
-def test_reputation_reflects_score_changes(client: TestClient) -> None:
+def test_reputation_reflects_score_changes(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("ALLOW_TEST_BOOTSTRAP", "1")
     # Drive reputation down with invalid signatures
     payload = _generate_valid_payload(client)
     payload["action"] = "finance:report:delete"
@@ -333,6 +336,43 @@ def test_reputation_reflects_score_changes(client: TestClient) -> None:
     data = response.json()
     assert data["agent_id"] == "agent-a"
     assert data["score"] < 100
+
+
+def test_admin_routes_require_a_key_outside_demo_mode(
+    client: TestClient, monkeypatch
+) -> None:
+    monkeypatch.setenv("ALLOW_TEST_BOOTSTRAP", "0")
+    monkeypatch.setenv("ADMIN_API_KEY", "admin-test-key")
+
+    assert client.get("/audit").status_code == 401
+    assert client.get("/audit", headers={"Authorization": "wrong"}).status_code == 401
+    assert (
+        client.get("/audit", headers={"Authorization": "admin-test-key"}).status_code
+        == 200
+    )
+    assert client.get("/reputation/agent-a").status_code == 401
+    assert (
+        client.get(
+            "/reputation/agent-a", headers={"Authorization": "admin-test-key"}
+        ).status_code
+        == 200
+    )
+
+    _generate_valid_payload(client)
+    assert (
+        client.post(
+            "/agents/agent-a/revoke", json={"reason": "compromised"}
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/agents/agent-a/revoke",
+            json={"reason": "compromised"},
+            headers={"Authorization": "admin-test-key"},
+        ).status_code
+        == 200
+    )
 
 
 def test_health_check(client: TestClient) -> None:

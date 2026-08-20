@@ -4,8 +4,9 @@ import os
 import time
 import uuid
 from dataclasses import dataclass
+from hmac import compare_digest
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
 from agents.agent_a import AgentA, InstructionParseError
 from agents.business_actions import execute_action
@@ -54,6 +55,26 @@ def _require_demo_controls() -> None:
     """Keep dashboard actions unavailable unless this is an explicit demo deployment."""
     if os.getenv("ALLOW_TEST_BOOTSTRAP") != "1":
         raise HTTPException(status_code=403, detail="Dashboard controls are disabled")
+
+
+def verify_admin_key(authorization: str = Header(None)) -> None:
+    """Validate Admin API key for sensitive operations when demo mode is inactive."""
+    allow_test = os.getenv("ALLOW_TEST_BOOTSTRAP") == "1"
+    if allow_test:
+        return
+
+    expected_key = os.getenv("ADMIN_API_KEY", "")
+    if not expected_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Admin API Key is not configured on the server",
+        )
+
+    if authorization != expected_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or missing Admin API Key",
+        )
 
 
 def _bootstrap_credentials(
@@ -341,17 +362,16 @@ def submit_manual_prompt(payload: ManualPromptRequest, request: Request):
     return _verification_response(result)
 
 
-@router.post("/agents/{agent_id}/revoke")
+@router.post("/agents/{agent_id}/revoke", dependencies=[Depends(verify_admin_key)])
 def revoke_agent(agent_id: str, payload: RevocationRequest, request: Request):
     """Revoke an agent's active key."""
-    _require_demo_controls()
     key_registry = request.app.state.key_registry
     key_registry.revoke(agent_id, payload.reason)
     status = key_registry.get_status(agent_id)
     return {"agent_id": agent_id, "status": status}
 
 
-@router.get("/audit", response_model=list[AuditRecordResponse])
+@router.get("/audit", response_model=list[AuditRecordResponse], dependencies=[Depends(verify_admin_key)])
 def get_audit(
     request: Request,
     issuer: str | None = None,
@@ -386,7 +406,7 @@ def get_audit(
     ]
 
 
-@router.get("/reputation/{agent_id}", response_model=ReputationResponse)
+@router.get("/reputation/{agent_id}", response_model=ReputationResponse, dependencies=[Depends(verify_admin_key)])
 def get_reputation(agent_id: str, request: Request):
     """Get the reputation of a specific agent."""
     reputation_service = request.app.state.reputation_service
@@ -427,7 +447,7 @@ def health_check(request: Request):
     )
 
 
-@router.get("/dashboard/state", response_model=DashboardStateResponse)
+@router.get("/dashboard/state", response_model=DashboardStateResponse, dependencies=[Depends(verify_admin_key)])
 def get_dashboard_state(request: Request):
     """Aggregated endpoint for the dashboard."""
     health = health_check(request)

@@ -21,6 +21,12 @@ Parameters:
     Default: '0'
     AllowedValues: ['0', '1']
     Description: Enable the development-only /test/bootstrap endpoint only for demos.
+  AdminApiKey:
+    Type: String
+    NoEcho: true
+    Description: >-
+      Administrative API key for protected read and control endpoints. In production,
+      source this from AWS Secrets Manager or SSM Parameter Store instead.
 
 Resources:
   ReplayTable:
@@ -92,6 +98,29 @@ Resources:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: $default
+      Auth:
+        DefaultAuthorizer: LambdaAuthorizer
+        Authorizers:
+          LambdaAuthorizer:
+            AuthorizerPayloadFormatVersion: '2.0'
+            EnableSimpleResponses: true
+            FunctionArn: !GetAtt AuthorizerFunction.Arn
+            Identity:
+              Headers:
+                - Authorization
+
+  AuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../
+      Handler: api.authorizer.handler
+      Runtime: python3.12
+      MemorySize: 128
+      Timeout: 5
+      Environment:
+        Variables:
+          ADMIN_API_KEY: !Ref AdminApiKey
+          ALLOW_TEST_BOOTSTRAP: !Ref AllowTestBootstrap
 
   TrustVerifierFunction:
     Type: AWS::Serverless::Function
@@ -110,6 +139,7 @@ Resources:
           REPUTATION_TABLE: !Ref ReputationTable
           ROOT_PRIVATE_KEY_B64: !Ref RootPrivateKeyB64
           GEMINI_API_KEY: !Ref GeminiApiKey
+          ADMIN_API_KEY: !Ref AdminApiKey
           ALLOW_TEST_BOOTSTRAP: !Ref AllowTestBootstrap
           VERIFIER_AGENT_ID: agent-api
           ENVIRONMENT: aws
