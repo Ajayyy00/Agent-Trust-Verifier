@@ -21,7 +21,9 @@ from verifier.result import AUDIT_FAILURE
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run live fail-closed audit validation")
+    parser = argparse.ArgumentParser(
+        description="Run live fail-closed audit validation"
+    )
     parser.add_argument("--base-url", required=True)
     args = parser.parse_args()
 
@@ -38,9 +40,15 @@ def main() -> int:
     print(f"HTTP status: {response.status_code}")
     print(f"accepted: {body.get('accepted')}")
     print(f"reason_code: {body.get('reason_code')}")
-    if response.status_code != 200 or body.get("accepted") is not False or body.get("reason_code") != AUDIT_FAILURE:
+    if (
+        response.status_code != 200
+        or body.get("accepted") is not False
+        or body.get("reason_code") != AUDIT_FAILURE
+    ):
         raise AssertionError("Fail-closed audit invariant failed")
-    print("PASS: audit backend failure was returned as AUDIT_FAILURE, not a 500 or acceptance.")
+    print(
+        "PASS: audit backend failure was returned as AUDIT_FAILURE, not a 500 or acceptance."
+    )
     return 0
 
 

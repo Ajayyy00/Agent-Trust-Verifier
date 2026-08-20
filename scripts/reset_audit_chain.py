@@ -43,13 +43,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Reset the deployed demo audit chain")
     parser.add_argument("--stack-name", default="agent-trust-verifier")
     parser.add_argument("--region", default=os.getenv("AWS_REGION", "eu-north-1"))
-    parser.add_argument("--yes", action="store_true", help="Confirm deletion of every audit record")
+    parser.add_argument(
+        "--yes", action="store_true", help="Confirm deletion of every audit record"
+    )
     args = parser.parse_args()
     if not args.yes:
         parser.error("Refusing to delete audit data without --yes")
 
     session = boto3.session.Session(region_name=args.region)
-    table_name = resolve_audit_table_name(session.client("cloudformation"), args.stack_name)
+    table_name = resolve_audit_table_name(
+        session.client("cloudformation"), args.stack_name
+    )
     deleted = delete_all_items(session.resource("dynamodb").Table(table_name))
     print(f"Reset audit table {table_name}: deleted {deleted} item(s).")
     return 0

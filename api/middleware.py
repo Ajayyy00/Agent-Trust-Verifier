@@ -20,9 +20,7 @@ class PayloadSizeLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         content_length = request.headers.get("content-length")
         if content_length and int(content_length) > self.max_upload_size:
-            return JSONResponse(
-                status_code=413, content={"error": "Payload too large"}
-            )
+            return JSONResponse(status_code=413, content={"error": "Payload too large"})
         return await call_next(request)
 
 
@@ -45,7 +43,9 @@ class BasicRateLimitMiddleware(BaseHTTPMiddleware):
 
         # Cleanup old requests
         self._requests[client_ip] = [
-            t for t in self._requests.get(client_ip, []) if now - t < self._window_seconds
+            t
+            for t in self._requests.get(client_ip, [])
+            if now - t < self._window_seconds
         ]
 
         if len(self._requests[client_ip]) >= self._max_requests:
@@ -63,7 +63,7 @@ class GlobalExceptionHandlerMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         try:
             return await call_next(request)
-        except Exception as e:
+        except Exception:
             logger.exception("Unhandled server error")
             return JSONResponse(
                 status_code=500, content={"error": "Internal server error"}

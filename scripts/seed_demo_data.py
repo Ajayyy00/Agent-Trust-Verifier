@@ -36,7 +36,9 @@ def bootstrap(client: httpx.Client, subject_agent_id: str) -> dict:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Seed demo identities through a deployed API")
+    parser = argparse.ArgumentParser(
+        description="Seed demo identities through a deployed API"
+    )
     parser.add_argument("--base-url", required=True, help="Deployed API base URL")
     args = parser.parse_args()
 

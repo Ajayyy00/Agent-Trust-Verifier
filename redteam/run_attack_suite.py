@@ -14,7 +14,9 @@ RESET = "\033[0m"
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run Agent Trust Verifier red-team attacks")
+    parser = argparse.ArgumentParser(
+        description="Run Agent Trust Verifier red-team attacks"
+    )
     parser.add_argument("--base-url", default="http://localhost:8000")
     parser.add_argument("--target-agent-id", default="agent-api")
     args = parser.parse_args()

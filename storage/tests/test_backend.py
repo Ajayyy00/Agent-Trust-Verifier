@@ -1,6 +1,11 @@
 import pytest
 
-from storage.backend import get_audit_service, get_key_registry, get_replay_store, get_reputation_service
+from storage.backend import (
+    get_audit_service,
+    get_key_registry,
+    get_replay_store,
+    get_reputation_service,
+)
 from verifier.replay_store import ReplayStore
 
 

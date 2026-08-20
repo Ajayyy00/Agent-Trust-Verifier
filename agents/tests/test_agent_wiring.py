@@ -8,7 +8,7 @@ Strategy:
 """
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import respx
@@ -17,13 +17,11 @@ from httpx import Response
 from agents.agent_a import AgentA, InstructionParseError
 from agents.agent_b import receive_instruction
 from authority.delegation_issuer import DelegationIssuer
+from identity.instruction import to_signable_dict
 from identity.keygen import (
     generate_keypair,
-    deserialize_public_key,
-    serialize_public_key,
     verify_signature,
 )
-from identity.instruction import to_signable_dict
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -125,6 +123,7 @@ def test_propose_instruction_with_missing_action_raises(monkeypatch, agent_a) ->
 # Agent B tests — mocked HTTP + spy on execute_action
 # ---------------------------------------------------------------------------
 
+
 def _make_instruction(agent_a, monkeypatch):
     monkeypatch.setattr("agents.llm_client.ask_agent", lambda *_: FIXED_LLM_JSON)
     return agent_a.propose_instruction("Generate Q3 report for ACC-001")
@@ -192,6 +191,32 @@ def test_agent_b_never_calls_execute_action_when_rejected(monkeypatch, agent_a) 
     assert result["execution_result"] is None
     assert result["verification"]["accepted"] is False
     assert result["verification"]["reason_code"] == "INVALID_SIGNATURE"
+
+
+@respx.mock
+def test_agent_b_blocks_accepted_instruction_requiring_review(
+    monkeypatch, agent_a
+) -> None:
+    instruction = _make_instruction(agent_a, monkeypatch)
+    accepted_response = {
+        "accepted": True,
+        "reason_code": "ACCEPTED",
+        "instruction_id": instruction.instruction_id,
+        "issuer": instruction.issuer,
+        "target": instruction.target_agent_id,
+        "action": instruction.action,
+        "token_id": instruction.delegation_token.token_id,
+        "reputation_score": 40,
+        "risk_level": "HIGH",
+        "requires_review": True,
+    }
+    respx.post(VERIFY_URL).mock(return_value=Response(200, json=accepted_response))
+
+    with patch("agents.agent_b.business_actions.execute_action") as mock_execute:
+        result = receive_instruction(instruction, API_BASE)
+
+    mock_execute.assert_not_called()
+    assert result["execution_result"] == "BLOCKED_BY_REPUTATION"
 
 
 @respx.mock

@@ -5,8 +5,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from identity.keygen import generate_keypair, load_keypair_from_private_key_b64
 from storage.backend import (
@@ -95,9 +95,13 @@ app.add_middleware(PayloadSizeLimitMiddleware, max_upload_size=512 * 1024)
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     from fastapi.encoders import jsonable_encoder
+
     return JSONResponse(
         status_code=422,
-        content={"error": "Validation error", "details": jsonable_encoder(exc.errors())},
+        content={
+            "error": "Validation error",
+            "details": jsonable_encoder(exc.errors()),
+        },
     )
 
 

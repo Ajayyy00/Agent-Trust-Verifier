@@ -4,9 +4,15 @@ import os
 import time
 import uuid
 from dataclasses import dataclass
-from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
+
+from agents.agent_a import AgentA, InstructionParseError
+from agents.business_actions import execute_action
+from authority.delegation_issuer import DelegationIssuer
+from identity.delegation_token import DelegationToken
+from identity.instruction import Instruction, sign_instruction
+from identity.keygen import generate_keypair, serialize_public_key
 
 from .schemas import (
     AuditRecordResponse,
@@ -17,17 +23,11 @@ from .schemas import (
     HealthResponse,
     InstructionPayload,
     ManualPromptRequest,
-    ReputationResponse,
     RedTeamRunRequest,
+    ReputationResponse,
     RevocationRequest,
     VerificationResponse,
 )
-from authority.delegation_issuer import DelegationIssuer
-from agents.business_actions import execute_action
-from agents.agent_a import AgentA, InstructionParseError
-from identity.delegation_token import DelegationToken
-from identity.instruction import Instruction, sign_instruction
-from identity.keygen import generate_keypair, serialize_public_key
 
 router = APIRouter()
 
@@ -83,6 +83,15 @@ def _bootstrap_credentials(
     )
 
 
+def _reject_dashboard_identity_bootstrap(subject_agent_id: str) -> None:
+    """Prevent public demo bootstrap from replacing dashboard agent identities."""
+    if subject_agent_id in _DASHBOARD_AGENTS:
+        raise HTTPException(
+            status_code=403,
+            detail="Bootstrap cannot register a dashboard agent identity",
+        )
+
+
 def _manual_agent_credentials(app, agent_id: str) -> _ManualAgentCredentials:
     """Provision one process-local signing identity for an interactive dashboard agent."""
     credentials_by_agent = getattr(app.state, "manual_agent_credentials", None)
@@ -115,7 +124,9 @@ def _manual_agent_credentials(app, agent_id: str) -> _ManualAgentCredentials:
 
 
 @router.post("/test/bootstrap", response_model=BootstrapResponse)
-def bootstrap_test_identity(payload: BootstrapRequest, request: Request) -> BootstrapResponse:
+def bootstrap_test_identity(
+    payload: BootstrapRequest, request: Request
+) -> BootstrapResponse:
     """Register an ephemeral test identity and issue a root-signed token when enabled.
 
     This route is intentionally unavailable unless the server is explicitly started
@@ -124,6 +135,7 @@ def bootstrap_test_identity(payload: BootstrapRequest, request: Request) -> Boot
     """
     if os.getenv("ALLOW_TEST_BOOTSTRAP") != "1":
         raise HTTPException(status_code=403, detail="Test bootstrap is disabled")
+    _reject_dashboard_identity_bootstrap(payload.subject_agent_id)
 
     return _bootstrap_credentials(
         request.app, payload.public_key, payload.subject_agent_id
@@ -131,8 +143,11 @@ def bootstrap_test_identity(payload: BootstrapRequest, request: Request) -> Boot
 
 
 from pydantic import BaseModel
+
+
 class ChaosRequest(BaseModel):
     fail_next: bool
+
 
 @router.post("/test/chaos/audit")
 def induce_audit_chaos(payload: ChaosRequest, request: Request):
@@ -224,6 +239,7 @@ class _DashboardAttackClient:
 
     def post(self, path: str, json: dict) -> _InProcessResponse:
         if path == "/test/bootstrap":
+            _reject_dashboard_identity_bootstrap(json["subject_agent_id"])
             credentials = _bootstrap_credentials(
                 self.app, json["public_key"], json["subject_agent_id"]
             )
@@ -237,7 +253,10 @@ class _DashboardAttackClient:
             self.app.state.key_registry.revoke(agent_id, json["reason"])
             return _InProcessResponse(
                 200,
-                {"agent_id": agent_id, "status": self.app.state.key_registry.get_status(agent_id)},
+                {
+                    "agent_id": agent_id,
+                    "status": self.app.state.key_registry.get_status(agent_id),
+                },
             )
         return _InProcessResponse(404, {"detail": "Not found"})
 
@@ -313,8 +332,10 @@ def submit_manual_prompt(payload: ManualPromptRequest, request: Request):
     )
     try:
         instruction = agent.propose_instruction(payload.prompt)
-    except (InstructionParseError, RuntimeError, EnvironmentError) as error:
-        raise HTTPException(status_code=502, detail=f"Prompt parsing failed: {error}") from error
+    except (OSError, InstructionParseError, RuntimeError) as error:
+        raise HTTPException(
+            status_code=502, detail=f"Prompt parsing failed: {error}"
+        ) from error
 
     result = request.app.state.trust_verifier.verify(instruction, int(time.time()))
     return _verification_response(result)
@@ -323,19 +344,20 @@ def submit_manual_prompt(payload: ManualPromptRequest, request: Request):
 @router.post("/agents/{agent_id}/revoke")
 def revoke_agent(agent_id: str, payload: RevocationRequest, request: Request):
     """Revoke an agent's active key."""
+    _require_demo_controls()
     key_registry = request.app.state.key_registry
     key_registry.revoke(agent_id, payload.reason)
     status = key_registry.get_status(agent_id)
     return {"agent_id": agent_id, "status": status}
 
 
-@router.get("/audit", response_model=List[AuditRecordResponse])
+@router.get("/audit", response_model=list[AuditRecordResponse])
 def get_audit(
     request: Request,
-    issuer: Optional[str] = None,
-    target: Optional[str] = None,
-    start_time: Optional[int] = None,
-    end_time: Optional[int] = None,
+    issuer: str | None = None,
+    target: str | None = None,
+    start_time: int | None = None,
+    end_time: int | None = None,
 ):
     """Query the audit log."""
     audit_service = request.app.state.audit_service
@@ -392,7 +414,7 @@ def health_check(request: Request):
         if backend == "dynamodb":
             # Lightweight read against the DynamoDB backend
             request.app.state.key_registry.get_status("health-check-dummy")
-    except Exception:
+    except Exception:  # noqa: BLE001 - health checks must degrade to unhealthy
         status = "unhealthy"
 
     latency_ms = (time.perf_counter() - start) * 1000

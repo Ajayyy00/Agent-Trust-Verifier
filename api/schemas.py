@@ -1,18 +1,19 @@
 """Pydantic request/response models representing the API contract."""
 
-from typing import List, Literal, Optional
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
 class DelegationTokenPayload(BaseModel):
     token_id: str
     subject_agent_id: str
-    max_scope: List[str]
+    max_scope: list[str]
     delegation_depth: int
     max_delegation_depth: int
     expiry: int
     issuer_key_id: str
-    issuer_signature: Optional[str] = None
+    issuer_signature: str | None = None
 
 
 class BootstrapRequest(BaseModel):
@@ -37,7 +38,7 @@ class InstructionPayload(BaseModel):
     target_agent_id: str
     action: str
     signer_pubkey_id: str
-    signature: Optional[str] = None
+    signature: str | None = None
     delegation_token: DelegationTokenPayload
     params: dict = {}
 
@@ -53,7 +54,7 @@ class VerificationResponse(BaseModel):
     issuer: str
     target: str
     action: str
-    token_id: Optional[str] = None
+    token_id: str | None = None
     reputation_score: int
     risk_level: str
     requires_review: bool
@@ -62,7 +63,7 @@ class VerificationResponse(BaseModel):
 class RedTeamRunRequest(BaseModel):
     """Optional subset of red-team attack function names to execute."""
 
-    attacks: List[str] | None = None
+    attacks: list[str] | None = None
 
 
 class ManualPromptRequest(BaseModel):
@@ -77,9 +78,9 @@ class AuditRecordResponse(BaseModel):
     issuer: str
     target: str
     action: str
-    token_id: Optional[str] = None
+    token_id: str | None = None
     policy_version: str
-    key_id: Optional[str] = None
+    key_id: str | None = None
     result: str
     reason_code: str
     timestamp: int
@@ -107,7 +108,7 @@ class DashboardStateResponse(BaseModel):
     health: HealthResponse
     reputation: dict[str, ReputationResponse]
     agent_status: dict[str, str]
-    audit_feed: List[AuditRecordResponse]
+    audit_feed: list[AuditRecordResponse]
 
 
 class ErrorResponse(BaseModel):

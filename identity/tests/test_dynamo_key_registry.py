@@ -11,7 +11,6 @@ from identity.keygen import (
 )
 from storage.tests.helpers import create_test_tables
 
-
 # ---------------------------------------------------------------------------
 # Fixture
 # ---------------------------------------------------------------------------
@@ -71,6 +70,8 @@ def test_rotation_creates_new_version_and_supersedes_old_key(
     assert registry.rotate("agent-a", "new-key") == "v2"
     assert registry.get_active_key("agent-a") == "new-key"
     assert registry.get_key_for_verification("agent-a", "v1") == "old-key"
+    assert registry.get_key_status("agent-a", "v1") == "superseded"
+    assert registry.get_key_status("agent-a", "v2") == "active"
 
 
 def test_registered_key_signs_and_detects_tampering(

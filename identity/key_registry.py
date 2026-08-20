@@ -1,7 +1,7 @@
 """Storage-agnostic in-memory public-key registry."""
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 @dataclass
@@ -56,6 +56,11 @@ class KeyRegistry:
             return "unknown"
         return self._keys[agent_id][version].status
 
+    def get_key_status(self, agent_id: str, key_version: str) -> str:
+        """Return the status of one key version, or ``unknown`` if absent."""
+        record = self._keys.get(agent_id, {}).get(key_version)
+        return record.status if record is not None else "unknown"
+
     def revoke(self, agent_id: str, reason: str) -> None:
         """Revoke the active key while retaining it for audit verification."""
         version = self._active_versions.get(agent_id)
@@ -63,7 +68,7 @@ class KeyRegistry:
             raise KeyError(f"Unknown agent: {agent_id}")
         record = self._keys[agent_id][version]
         record.status = "revoked"
-        record.revoked_at = datetime.now(timezone.utc)
+        record.revoked_at = datetime.now(UTC)
         record.revocation_reason = reason
 
     def rotate(self, agent_id: str, new_public_key_b64: str) -> str:

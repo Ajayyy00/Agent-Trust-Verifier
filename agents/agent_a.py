@@ -12,20 +12,19 @@ import time
 import uuid
 from dataclasses import dataclass
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-
+from agents import llm_client
 from identity.delegation_token import DelegationToken
 from identity.instruction import Instruction, sign_instruction
 from identity.keygen import KeyPair
 
-from agents import llm_client
-
 # Actions Agent A is allowed to request — this mirrors the delegation token's
 # max_scope and is used to constrain the LLM's output to valid choices.
-AVAILABLE_ACTIONS = list({
-    "finance:report:generate",
-    "finance:payment:refund",
-})
+AVAILABLE_ACTIONS = list(
+    {
+        "finance:report:generate",
+        "finance:payment:refund",
+    }
+)
 
 _SYSTEM_PROMPT = """You are Agent A, a financial automation agent.
 Your job is to decide which action to request based on a user task.
@@ -144,9 +143,7 @@ class AgentA:
         params = data.get("params", {})
 
         if not isinstance(action, str) or not action:
-            raise InstructionParseError(
-                f"LLM response missing 'action' field: {data}"
-            )
+            raise InstructionParseError(f"LLM response missing 'action' field: {data}")
         if not isinstance(params, dict):
             params = {}
 

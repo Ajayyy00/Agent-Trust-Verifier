@@ -7,6 +7,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from .delegation_token import (
     DelegationToken,
+)
+from .delegation_token import (
     to_signable_dict as token_to_signable_dict,
 )
 from .keygen import sign_payload

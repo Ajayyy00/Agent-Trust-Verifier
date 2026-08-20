@@ -24,4 +24,3 @@ class DynamoReplayStore:
                 return False
             raise
         return True
-

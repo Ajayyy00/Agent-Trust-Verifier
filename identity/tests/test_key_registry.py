@@ -43,6 +43,8 @@ def test_rotation_creates_new_version_and_supersedes_old_key() -> None:
     assert registry.get_active_key("agent-a") == "new-key"
     assert registry.get_key_for_verification("agent-a", "v1") == "old-key"
     assert registry._keys["agent-a"]["v1"].status == "superseded"
+    assert registry.get_key_status("agent-a", "v1") == "superseded"
+    assert registry.get_key_status("agent-a", "v2") == "active"
 
 
 def test_registered_key_signs_and_detects_tampering() -> None:

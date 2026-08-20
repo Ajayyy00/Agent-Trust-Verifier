@@ -1,5 +1,7 @@
 """FastAPI TestClient-based tests for the API layer."""
 
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -15,8 +17,6 @@ from verifier.result import (
     INVALID_SIGNATURE,
     TOKEN_SCOPE_DENIED,
 )
-
-import time
 
 ACTION = "finance:report:generate"
 
@@ -83,7 +83,7 @@ def _generate_valid_payload(client: TestClient) -> dict:
 def test_verify_happy_path(client: TestClient) -> None:
     payload = _generate_valid_payload(client)
     response = client.post("/instruction/verify", json=payload)
-    
+
     assert response.status_code == 200
     data = response.json()
     assert data["accepted"] is True
@@ -95,7 +95,12 @@ def test_dashboard_controls_are_demo_gated(client: TestClient, monkeypatch) -> N
 
     assert client.post("/redteam/run", json={}).status_code == 403
     assert client.post("/demo/send-valid").status_code == 403
-    assert client.post("/demo/manual", json={"prompt": "Generate a report", "agent_id": "agent_a"}).status_code == 403
+    assert (
+        client.post(
+            "/demo/manual", json={"prompt": "Generate a report", "agent_id": "agent_a"}
+        ).status_code
+        == 403
+    )
 
 
 def test_manual_prompt_is_llm_parsed_signed_and_verified(
@@ -180,7 +185,9 @@ def test_audit_chaos_route_forces_a_fail_closed_rejection(
     assert result.status_code == 200
     assert result.json()["accepted"] is False
     assert result.json()["reason_code"] == AUDIT_FAILURE
-    assert client.post("/test/chaos/audit", json={"fail_next": False}).status_code == 200
+    assert (
+        client.post("/test/chaos/audit", json={"fail_next": False}).status_code == 200
+    )
 
 
 def test_test_bootstrap_is_disabled_by_default(client: TestClient, monkeypatch) -> None:
@@ -247,15 +254,29 @@ def test_test_bootstrap_issues_a_token_that_verifies(
     assert response.json()["reason_code"] == ACCEPTED
 
 
+@pytest.mark.parametrize("agent_id", ["agent_a", "agent_b", "attacker"])
+def test_test_bootstrap_cannot_replace_dashboard_agent_identities(
+    client: TestClient, monkeypatch, agent_id: str
+) -> None:
+    monkeypatch.setenv("ALLOW_TEST_BOOTSTRAP", "1")
+
+    response = client.post(
+        "/test/bootstrap",
+        json={"public_key": "not-used", "subject_agent_id": agent_id},
+    )
+
+    assert response.status_code == 403
+
+
 def test_verify_tampered_instruction_is_a_business_rejection_not_http_error(
     client: TestClient,
 ) -> None:
     payload = _generate_valid_payload(client)
     # Tamper with the action
     payload["action"] = "finance:report:delete"
-    
+
     response = client.post("/instruction/verify", json=payload)
-    
+
     # HTTP status is still 200 OK because the request was well-formed
     # The payload signifies the security decision
     assert response.status_code == 200
@@ -264,9 +285,10 @@ def test_verify_tampered_instruction_is_a_business_rejection_not_http_error(
     assert data["reason_code"] == INVALID_SIGNATURE
 
 
-def test_revoke_agent_then_verify_fails(client: TestClient) -> None:
+def test_revoke_agent_then_verify_fails(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("ALLOW_TEST_BOOTSTRAP", "1")
     payload = _generate_valid_payload(client)
-    
+
     # First revoke the agent
     revoke_response = client.post(
         "/agents/agent-a/revoke", json={"reason": "compromised"}
@@ -292,7 +314,7 @@ def test_audit_filters(client: TestClient) -> None:
     data = response.json()
     assert len(data) >= 1
     assert data[-1]["issuer"] == "agent-a"
-    
+
     response_empty = client.get("/audit?issuer=agent-other")
     assert response_empty.status_code == 200
     assert len(response_empty.json()) == 0
@@ -302,7 +324,7 @@ def test_reputation_reflects_score_changes(client: TestClient) -> None:
     # Drive reputation down with invalid signatures
     payload = _generate_valid_payload(client)
     payload["action"] = "finance:report:delete"
-    
+
     client.post("/instruction/verify", json=payload)
     client.post("/instruction/verify", json=payload)
 
@@ -325,9 +347,9 @@ def test_health_check(client: TestClient) -> None:
 def test_payload_size_limit(client: TestClient) -> None:
     large_payload = "x" * (512 * 1024 + 10)
     response = client.post(
-        "/instruction/verify", 
+        "/instruction/verify",
         data=large_payload,
-        headers={"Content-Length": str(len(large_payload))}
+        headers={"Content-Length": str(len(large_payload))},
     )
     assert response.status_code == 413
     assert response.json()["error"] == "Payload too large"
@@ -335,7 +357,7 @@ def test_payload_size_limit(client: TestClient) -> None:
 
 def test_malformed_json_returns_structured_error(client: TestClient) -> None:
     response = client.post("/instruction/verify", data="not json")
-    
+
     # Should be 422 Unprocessable Entity for invalid json, not 500
     assert response.status_code == 422
     data = response.json()

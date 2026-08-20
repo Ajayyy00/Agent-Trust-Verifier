@@ -22,7 +22,9 @@ def test_concurrent_dynamo_nonce_consumption_has_exactly_one_winner() -> None:
     try:
         store = DynamoReplayStore(tables["replay"])
         with ThreadPoolExecutor(max_workers=8) as executor:
-            outcomes = list(executor.map(lambda _: store.consume("agent-b", "same"), range(16)))
+            outcomes = list(
+                executor.map(lambda _: store.consume("agent-b", "same"), range(16))
+            )
 
         assert outcomes.count(True) == 1
         assert outcomes.count(False) == 15

@@ -15,7 +15,6 @@ from reputation.scorer import (
 from storage.tests.helpers import create_test_tables
 from verifier.result import ACCEPTED, AGENT_REVOKED, AUDIT_FAILURE, INVALID_SIGNATURE
 
-
 # ---------------------------------------------------------------------------
 # Fixture
 # ---------------------------------------------------------------------------
@@ -137,7 +136,7 @@ def test_concurrent_reputation_updates_have_no_lost_writes() -> None:
         n_calls = 50
         reason_code = ACCEPTED  # weight = +1 per call
         with ThreadPoolExecutor(max_workers=10) as executor:
-            scores = list(
+            list(
                 executor.map(
                     lambda _: service.record_outcome("agent-concurrent", reason_code),
                     range(n_calls),
@@ -164,7 +163,9 @@ def test_concurrent_reputation_updates_have_no_lost_writes() -> None:
             with ThreadPoolExecutor(max_workers=10) as executor:
                 list(
                     executor.map(
-                        lambda _: service2.record_outcome("agent-race", "STALE_INSTRUCTION"),
+                        lambda _: service2.record_outcome(
+                            "agent-race", "STALE_INSTRUCTION"
+                        ),
                         range(n_stale),
                     )
                 )
@@ -172,7 +173,9 @@ def test_concurrent_reputation_updates_have_no_lost_writes() -> None:
             final_raw_score = service2._table.get_item(
                 Key={"agent_id": "agent-race"}, ConsistentRead=True
             )["Item"]["score"]
-            expected_unclamped = BASELINE_SCORE + n_stale * stale_weight  # 100 + 10*(-5) = 50
+            expected_unclamped = (
+                BASELINE_SCORE + n_stale * stale_weight
+            )  # 100 + 10*(-5) = 50
 
             # The raw DynamoDB value equals the exact sum — no lost updates.
             assert int(final_raw_score) == expected_unclamped, (
@@ -186,6 +189,6 @@ def test_concurrent_reputation_updates_have_no_lost_writes() -> None:
     except Exception:
         try:
             mock.stop()
-        except Exception:
+        except Exception:  # noqa: S110, BLE001 - preserve the original test error
             pass
         raise

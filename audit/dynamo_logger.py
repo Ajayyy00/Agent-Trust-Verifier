@@ -68,7 +68,9 @@ class DynamoAuditService:
                 Key={"instruction_id": _CHAOS_ID}, ConsistentRead=True
             )
         except ClientError as error:
-            raise AuditCommitError("Unable to read audit failure test switch") from error
+            raise AuditCommitError(
+                "Unable to read audit failure test switch"
+            ) from error
         return bool(response.get("Item", {}).get("enabled", False))
 
     def _transactional_append(
@@ -91,14 +93,14 @@ class DynamoAuditService:
             "sequence": sequence,
         }
         transactions = [
-                {
-                    "Put": {
-                        "TableName": self._table.name,
-                        "Item": item,
-                        "ConditionExpression": "attribute_not_exists(#id)",
-                        "ExpressionAttributeNames": {"#id": "instruction_id"},
-                    }
+            {
+                "Put": {
+                    "TableName": self._table.name,
+                    "Item": item,
+                    "ConditionExpression": "attribute_not_exists(#id)",
+                    "ExpressionAttributeNames": {"#id": "instruction_id"},
                 }
+            }
         ]
         if head_exists:
             transactions.append(
@@ -133,9 +135,7 @@ class DynamoAuditService:
                     }
                 }
             )
-        self._table.meta.client.transact_write_items(
-            TransactItems=transactions
-        )
+        self._table.meta.client.transact_write_items(TransactItems=transactions)
         return record
 
     def commit(self, record_fields: dict[str, Any]) -> AuditRecord:
@@ -152,14 +152,21 @@ class DynamoAuditService:
                         sequence + 1, previous_hash, record_fields, head_exists
                     )
                 except ClientError as error:
-                    if error.response.get("Error", {}).get("Code") != "TransactionCanceledException":
-                        raise AuditCommitError("Unable to commit audit record to DynamoDB") from error
+                    if (
+                        error.response.get("Error", {}).get("Code")
+                        != "TransactionCanceledException"
+                    ):
+                        raise AuditCommitError(
+                            "Unable to commit audit record to DynamoDB"
+                        ) from error
                     last_cancellation = error
                     if attempt == _MAX_TRANSACTION_ATTEMPTS - 1:
                         break
                     time.sleep(_RETRY_BASE_SECONDS * (2**attempt))
                 except Exception as error:
-                    raise AuditCommitError("Unable to commit audit record to DynamoDB") from error
+                    raise AuditCommitError(
+                        "Unable to commit audit record to DynamoDB"
+                    ) from error
 
         raise AuditCommitError(
             "Audit-chain head changed too frequently to commit safely"
@@ -174,18 +181,32 @@ class DynamoAuditService:
     ) -> list[AuditRecord]:
         """Filter audit records and return them chronologically."""
         if issuer is not None:
-            response = self._table.query(
-                IndexName="issuer-index", KeyConditionExpression=Key("issuer").eq(issuer)
-            )
+            operation = self._table.query
+            request_kwargs: dict[str, Any] = {
+                "IndexName": "issuer-index",
+                "KeyConditionExpression": Key("issuer").eq(issuer),
+            }
         elif target is not None:
-            response = self._table.query(
-                IndexName="target-index", KeyConditionExpression=Key("target").eq(target)
-            )
+            operation = self._table.query
+            request_kwargs = {
+                "IndexName": "target-index",
+                "KeyConditionExpression": Key("target").eq(target),
+            }
         else:
-            response = self._table.scan()
+            operation = self._table.scan
+            request_kwargs = {}
+
+        items: list[dict[str, Any]] = []
+        while True:
+            page = operation(**request_kwargs)
+            items.extend(page.get("Items", []))
+            last_key = page.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            request_kwargs["ExclusiveStartKey"] = last_key
         records = [
             self._record_from_item(item)
-            for item in response.get("Items", [])
+            for item in items
             if item["instruction_id"]
             not in {_CHAIN_HEAD_ID, _LEGACY_COUNTER_ID, _CHAOS_ID}
             and (issuer is None or item["issuer"] == issuer)
@@ -199,10 +220,18 @@ class DynamoAuditService:
 
     def verify_integrity(self) -> tuple[bool, int | None]:
         """Verify the persisted chain in numeric sequence order."""
-        response = self._table.scan()
+        items: list[dict[str, Any]] = []
+        scan_kwargs: dict[str, Any] = {}
+        while True:
+            page = self._table.scan(**scan_kwargs)
+            items.extend(page.get("Items", []))
+            last_key = page.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            scan_kwargs["ExclusiveStartKey"] = last_key
         records_with_sequence = [
             item
-            for item in response.get("Items", [])
+            for item in items
             if item["instruction_id"]
             not in {_CHAIN_HEAD_ID, _LEGACY_COUNTER_ID, _CHAOS_ID}
         ]
@@ -233,4 +262,6 @@ class DynamoAuditService:
                 Item={"instruction_id": _CHAOS_ID, "enabled": bool(enabled)}
             )
         except ClientError as error:
-            raise AuditCommitError("Unable to configure audit failure test switch") from error
+            raise AuditCommitError(
+                "Unable to configure audit failure test switch"
+            ) from error

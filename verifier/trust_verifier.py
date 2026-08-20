@@ -1,14 +1,15 @@
 """Fail-closed, ordered verification of signed agent instructions."""
 
 from __future__ import annotations
-from typing import TYPE_CHECKING
 
 import hashlib
+from collections.abc import Mapping
 from dataclasses import replace
+from typing import TYPE_CHECKING, Any
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-from audit.logger import AuditCommitError, AuditService
+from audit.logger import AuditService
 from authority.delegation_issuer import verify_token_signature
 from identity.canonical import canonicalize
 from identity.delegation_token import is_expired
@@ -84,7 +85,7 @@ class TrustVerifier:
     ) -> VerificationResult:
         """Run the ordered trust checks and return the underlying security decision."""
         if not isinstance(instruction, Instruction):
-            return VerificationResult(False, INVALID_SCHEMA, "", "", "", "")
+            return self._malformed_result(instruction)
 
         if instruction.target_agent_id != self.agent_id:
             return self._result(instruction, False, WRONG_AUDIENCE)
@@ -124,8 +125,14 @@ class TrustVerifier:
         if not signature_is_valid:
             return self._result(instruction, False, INVALID_SIGNATURE)
 
-        # Read the live registry on every attempt: revocation takes effect in one cycle.
-        if self.key_registry.get_status(instruction.issuer) != "active":
+        # Read this signer's live key status on every attempt. A rotated or revoked
+        # key must never authorize a new instruction, even if a newer key is active.
+        if (
+            self.key_registry.get_key_status(
+                instruction.issuer, instruction.signer_pubkey_id
+            )
+            != "active"
+        ):
             return self._result(instruction, False, AGENT_REVOKED)
 
         if not is_action_within_scope(
@@ -143,14 +150,44 @@ class TrustVerifier:
 
         return self._result(instruction, True, ACCEPTED)
 
+    @staticmethod
+    def _malformed_result(instruction: object) -> VerificationResult:
+        """Extract safe audit metadata from a payload that is not an Instruction."""
+        payload: Mapping[str, Any] = (
+            instruction if isinstance(instruction, Mapping) else {}
+        )
+        token = payload.get("delegation_token", {})
+        token_id = token.get("token_id") if isinstance(token, Mapping) else None
+        return VerificationResult(
+            accepted=False,
+            reason_code=INVALID_SCHEMA,
+            instruction_id=str(payload.get("instruction_id", "")),
+            issuer=str(payload.get("issuer", "")),
+            target=str(payload.get("target_agent_id", "")),
+            action=str(payload.get("action", "")),
+            token_id=str(token_id) if token_id is not None else None,
+        )
+
+    @staticmethod
+    def _payload_hash(instruction: object) -> str:
+        """Hash valid envelopes canonically and malformed payloads defensively."""
+        if isinstance(instruction, Instruction):
+            payload = canonicalize(to_signable_dict(instruction))
+        elif isinstance(instruction, Mapping):
+            try:
+                payload = canonicalize(dict(instruction))
+            except (TypeError, ValueError):
+                payload = repr(instruction).encode()
+        else:
+            payload = repr(instruction).encode()
+        return hashlib.sha256(payload).hexdigest()
+
     def _audit_and_return(
         self, instruction: Instruction, decision: VerificationResult, now: int
     ) -> VerificationResult:
         """Persist a decision, rejecting it if its audit record cannot be committed."""
         try:
-            payload_hash = hashlib.sha256(
-                canonicalize(to_signable_dict(instruction))
-            ).hexdigest()
+            payload_hash = self._payload_hash(instruction)
             self.audit_service.commit(
                 {
                     "instruction_id": decision.instruction_id,
@@ -159,7 +196,15 @@ class TrustVerifier:
                     "action": decision.action,
                     "token_id": decision.token_id,
                     "policy_version": "v1",
-                    "key_id": getattr(instruction, "signer_pubkey_id", None),
+                    "key_id": (
+                        getattr(instruction, "signer_pubkey_id", None)
+                        if isinstance(instruction, Instruction)
+                        else (
+                            instruction.get("signer_pubkey_id")
+                            if isinstance(instruction, Mapping)
+                            else None
+                        )
+                    ),
                     "result": (
                         "accepted" if decision.reason_code == ACCEPTED else "rejected"
                     ),
@@ -168,7 +213,7 @@ class TrustVerifier:
                     "payload_hash": payload_hash,
                 }
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - audit persistence must fail closed
             return VerificationResult(
                 accepted=False,
                 reason_code=AUDIT_FAILURE,
@@ -183,20 +228,18 @@ class TrustVerifier:
     def verify(self, instruction: Instruction, now: int) -> VerificationResult:
         """Verify an instruction and fail closed if its audit record cannot be persisted."""
         decision = self._security_decision(instruction, now)
-        if decision.reason_code == INVALID_SCHEMA:
-            return decision
         finalized_result = self._audit_and_return(instruction, decision, now)
         try:
             score = self.reputation_service.record_outcome(
-                instruction.issuer, finalized_result.reason_code
+                decision.issuer, finalized_result.reason_code
             )
             return replace(
                 finalized_result,
                 reputation_score=score,
-                risk_level=self.reputation_service.get_risk_level(instruction.issuer),
+                risk_level=self.reputation_service.get_risk_level(decision.issuer),
                 requires_review=self.reputation_service.requires_review(
-                    instruction.issuer
+                    decision.issuer
                 ),
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - reputation must remain advisory
             return finalized_result

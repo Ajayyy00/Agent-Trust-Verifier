@@ -83,6 +83,9 @@ def test_invalid_schema_is_rejected_directly() -> None:
 
     assert result.accepted is False
     assert result.reason_code == INVALID_SCHEMA
+    assert len(verifier.audit_service.records) == 1
+    assert verifier.audit_service.records[0].reason_code == INVALID_SCHEMA
+    assert verifier.reputation_service.get_score("") == 95
 
 
 def test_accepted_instruction_creates_audit_record() -> None:
@@ -191,6 +194,13 @@ def test_unknown_key_id_is_rejected() -> None:
 def test_revoked_issuer_is_rejected() -> None:
     verifier, instruction, registry = _happy_path()
     registry.revoke("agent_a", "credential compromised")
+
+    assert verifier.verify(instruction, NOW).reason_code == AGENT_REVOKED
+
+
+def test_instruction_signed_by_superseded_key_is_rejected() -> None:
+    verifier, instruction, registry = _happy_path()
+    registry.rotate("agent_a", serialize_public_key(generate_keypair().public_key))
 
     assert verifier.verify(instruction, NOW).reason_code == AGENT_REVOKED
 

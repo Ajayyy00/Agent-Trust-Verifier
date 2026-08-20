@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from identity.delegation_token import DelegationToken
 from identity.instruction import Instruction, sign_instruction
@@ -52,7 +53,9 @@ class AttackContext:
         return sign_instruction(unsigned, self.keypair.private_key)
 
 
-def create_attack_context(client: Any, target_agent_id: str = "agent-api") -> AttackContext:
+def create_attack_context(
+    client: Any, target_agent_id: str = "agent-api"
+) -> AttackContext:
     """Provision an ephemeral red-team identity through the gated test endpoint."""
     keypair = generate_keypair()
     subject_agent_id = f"redteam-{uuid.uuid4().hex}"
@@ -105,7 +108,9 @@ def _instruction_payload(instruction: Instruction) -> dict[str, Any]:
 
 
 def _post_instruction(context: AttackContext, instruction: Instruction) -> Any:
-    return context.client.post("/instruction/verify", json=_instruction_payload(instruction))
+    return context.client.post(
+        "/instruction/verify", json=_instruction_payload(instruction)
+    )
 
 
 def _response_body(response: Any) -> dict[str, Any]:
@@ -130,36 +135,52 @@ def _result(name: str, expected_reason: str, response: Any) -> dict[str, Any]:
 def attack_unsigned_instruction(context: AttackContext) -> dict[str, Any]:
     instruction = context.new_instruction()
     instruction.signature = None
-    return _result("unsigned instruction", INVALID_SIGNATURE, _post_instruction(context, instruction))
+    return _result(
+        "unsigned instruction",
+        INVALID_SIGNATURE,
+        _post_instruction(context, instruction),
+    )
 
 
 def attack_forged_signature(context: AttackContext) -> dict[str, Any]:
-    instruction = sign_instruction(context.new_instruction(), generate_keypair().private_key)
-    return _result("forged signature", INVALID_SIGNATURE, _post_instruction(context, instruction))
+    instruction = sign_instruction(
+        context.new_instruction(), generate_keypair().private_key
+    )
+    return _result(
+        "forged signature", INVALID_SIGNATURE, _post_instruction(context, instruction)
+    )
 
 
 def attack_tampered_action(context: AttackContext) -> dict[str, Any]:
     instruction = context.new_instruction()
     instruction.action = SCOPE_ESCAPE_ACTION
-    return _result("tampered action", INVALID_SIGNATURE, _post_instruction(context, instruction))
+    return _result(
+        "tampered action", INVALID_SIGNATURE, _post_instruction(context, instruction)
+    )
 
 
 def attack_wrong_destination(context: AttackContext) -> dict[str, Any]:
     """Change the audience after signing; audience is checked before signature validity."""
     instruction = context.new_instruction()
     instruction.target_agent_id = "redteam-wrong-destination"
-    return _result("wrong destination", WRONG_AUDIENCE, _post_instruction(context, instruction))
+    return _result(
+        "wrong destination", WRONG_AUDIENCE, _post_instruction(context, instruction)
+    )
 
 
 def attack_scope_escalation(context: AttackContext) -> dict[str, Any]:
     instruction = context.new_instruction(SCOPE_ESCAPE_ACTION)
-    return _result("scope escalation", TOKEN_SCOPE_DENIED, _post_instruction(context, instruction))
+    return _result(
+        "scope escalation", TOKEN_SCOPE_DENIED, _post_instruction(context, instruction)
+    )
 
 
 def attack_expired_token(context: AttackContext) -> dict[str, Any]:
     instruction = context.new_instruction()
     instruction.delegation_token.expiry = int(time.time()) - 1
-    return _result("expired token", TOKEN_EXPIRED, _post_instruction(context, instruction))
+    return _result(
+        "expired token", TOKEN_EXPIRED, _post_instruction(context, instruction)
+    )
 
 
 def attack_replay(context: AttackContext) -> dict[str, Any]:
@@ -169,7 +190,9 @@ def attack_replay(context: AttackContext) -> dict[str, Any]:
     first_body = _response_body(first_response)
     second_body = _response_body(second_response)
     expected_reason = f"{ACCEPTED} -> {REPLAY_DETECTED}"
-    actual_reason = f"{first_body.get('reason_code')} -> {second_body.get('reason_code')}"
+    actual_reason = (
+        f"{first_body.get('reason_code')} -> {second_body.get('reason_code')}"
+    )
     return {
         "name": "replay",
         "expected_reason": expected_reason,
@@ -211,6 +234,10 @@ ATTACKS: list[Callable[[AttackContext], dict[str, Any]]] = [
 ]
 
 
-def run_all_attacks(client: Any, target_agent_id: str = "agent-api") -> list[dict[str, Any]]:
+def run_all_attacks(
+    client: Any, target_agent_id: str = "agent-api"
+) -> list[dict[str, Any]]:
     """Run all scenarios using a fresh provisioned identity for each attack."""
-    return [attack(create_attack_context(client, target_agent_id)) for attack in ATTACKS]
+    return [
+        attack(create_attack_context(client, target_agent_id)) for attack in ATTACKS
+    ]

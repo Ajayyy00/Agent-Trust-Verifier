@@ -9,8 +9,8 @@ Install: pip install google-genai
 
 import os
 import time
-from dotenv import load_dotenv
 
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
@@ -25,7 +25,7 @@ def ask_agent(system_prompt: str, user_task: str) -> str:
     """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        raise EnvironmentError(
+        raise OSError(
             "GEMINI_API_KEY environment variable is not set. "
             "Export it before running agents."
         )
@@ -52,4 +52,4 @@ def ask_agent(system_prompt: str, user_task: str) -> str:
                 raise RuntimeError(
                     f"Gemini API call failed after {max_retries + 1} attempts: {exc}"
                 ) from exc
-            time.sleep(delay * (2 ** attempt))
+            time.sleep(delay * (2**attempt))

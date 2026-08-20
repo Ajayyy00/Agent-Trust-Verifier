@@ -1,6 +1,6 @@
 """DynamoDB-backed public-key registry."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from boto3.dynamodb.conditions import Key
@@ -86,12 +86,20 @@ class DynamoKeyRegistry:
         )
         return response.get("Item", {}).get("status", "unknown")
 
+    def get_key_status(self, agent_id: str, key_version: str) -> str:
+        """Return the live status of a specific key version."""
+        response = self._table.get_item(
+            Key={"agent_id": agent_id, "key_version": key_version},
+            ConsistentRead=True,
+        )
+        return response.get("Item", {}).get("status", "unknown")
+
     def revoke(self, agent_id: str, reason: str) -> None:
         """Revoke the active key while preserving it for historical verification."""
         metadata = self._active_metadata(agent_id)
         if metadata is None:
             raise KeyError(f"Unknown agent: {agent_id}")
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         for key_version in (metadata["active_version"], _ACTIVE_VERSION):
             self._table.update_item(
                 Key={"agent_id": agent_id, "key_version": key_version},

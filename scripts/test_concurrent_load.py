@@ -21,12 +21,13 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from redteam.attacks import _instruction_payload, create_attack_context
 from verifier.result import ACCEPTED, REPLAY_DETECTED
 
-
 _TRANSIENT_STATUS_CODES = {429, 503, 504}
 _MAX_TRANSPORT_ATTEMPTS = 5
 
 
-async def post_with_transient_retry(client: httpx.AsyncClient, payload: dict) -> httpx.Response:
+async def post_with_transient_retry(
+    client: httpx.AsyncClient, payload: dict
+) -> httpx.Response:
     """Retry API/Lambda capacity failures without changing the signed payload."""
     response: httpx.Response | None = None
     for attempt in range(_MAX_TRANSPORT_ATTEMPTS):
@@ -78,7 +79,9 @@ async def run(base_url: str, requests: int) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run live replay-concurrency validation")
+    parser = argparse.ArgumentParser(
+        description="Run live replay-concurrency validation"
+    )
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--requests", type=int, default=20)
     args = parser.parse_args()

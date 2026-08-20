@@ -13,10 +13,8 @@ import logging
 
 import httpx
 
+from agents import business_actions, llm_client
 from identity.instruction import Instruction
-
-from agents import business_actions
-from agents import llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +99,17 @@ def receive_instruction(
             "execution_result": None,
         }
 
+    if verification.get("requires_review"):
+        logger.warning(
+            "Instruction %s accepted but blocked pending reputation review",
+            instruction.instruction_id,
+        )
+        return {
+            "verification": verification,
+            "narration": None,
+            "execution_result": "BLOCKED_BY_REPUTATION",
+        }
+
     # --- ACCEPTED — optionally narrate, then execute ---
     narration: str | None = None
     if narrate:
@@ -109,7 +118,7 @@ def receive_instruction(
                 _NARRATION_SYSTEM_PROMPT,
                 f"Action: {instruction.action}, Params: {instruction.params}",
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - narration must never block execution
             # Narration is cosmetic — don't let an LLM hiccup block execution
             logger.warning("Narration call failed (non-fatal): %s", exc)
             narration = None

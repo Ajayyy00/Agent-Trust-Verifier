@@ -51,7 +51,11 @@ class DynamoReputationService:
 
     def get_risk_level(self, agent_id: str) -> str:
         """Return the advisory risk level for the stored score."""
-        return "HIGH" if self.get_score(agent_id) < HEIGHTENED_SCRUTINY_THRESHOLD else "NORMAL"
+        return (
+            "HIGH"
+            if self.get_score(agent_id) < HEIGHTENED_SCRUTINY_THRESHOLD
+            else "NORMAL"
+        )
 
     def requires_review(self, agent_id: str) -> bool:
         """Return whether the agent's advisory score warrants review."""

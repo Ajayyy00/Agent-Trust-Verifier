@@ -18,18 +18,19 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import httpx
 
-from identity.delegation_token import DelegationToken
-from identity.keygen import generate_keypair, serialize_public_key
-
 from agents.agent_a import AgentA
 from agents.agent_b import receive_instruction
+from identity.delegation_token import DelegationToken
+from identity.keygen import generate_keypair, serialize_public_key
 
 ACTION = "finance:report:generate"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the live Agent A/Agent B demo")
-    parser.add_argument("--base-url", default=os.getenv("API_BASE_URL", "http://127.0.0.1:8000"))
+    parser.add_argument(
+        "--base-url", default=os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
+    )
     args = parser.parse_args()
     api_base = args.base_url.rstrip("/")
     print("\n" + "=" * 60)
@@ -46,7 +47,10 @@ def main() -> None:
     print("[Setup] Registering Agent A and requesting a root-signed token...")
     bootstrap = httpx.post(
         f"{api_base}/test/bootstrap",
-        json={"public_key": serialize_public_key(agent_a_keypair.public_key), "subject_agent_id": "agent-a"},
+        json={
+            "public_key": serialize_public_key(agent_a_keypair.public_key),
+            "subject_agent_id": "agent-a",
+        },
         timeout=10.0,
     )
     if bootstrap.status_code != 200:
@@ -98,7 +102,7 @@ def main() -> None:
         print(f"\n[Agent B] Narration: {result['narration']}")
         print(f"[Agent B] Execution: {result['execution_result']}")
     else:
-        print(f"\n[Agent B] Rejected — no execution occurred.")
+        print("\n[Agent B] Rejected — no execution occurred.")
         print(f"[Agent B] execution_result: {result['execution_result']}")
 
     print("\n" + "=" * 60 + "\n")
